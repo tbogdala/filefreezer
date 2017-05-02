@@ -220,7 +220,7 @@ func TestBasicDBCreation(t *testing.T) {
 
 	// trim the buffer at the EOF marker of byte(0)
 	eofIndex := bytes.IndexByte(frankenBytes, byte(0))
-	if eofIndex < len(frankenBytes) {
+	if eofIndex > 0 && eofIndex < len(frankenBytes) {
 		frankenBytes = frankenBytes[:eofIndex]
 	}
 
@@ -328,7 +328,7 @@ func calcFileHashInfo(t *testing.T, maxChunkSize int64, filename string) (chunkC
 		t.Fatalf("Failed to stat the local file (%s) for the test.", filename)
 	}
 
-	lastMod = fileInfo.ModTime().Unix()
+	lastMod = fileInfo.ModTime().UTC().Unix()
 
 	// calculate the chunk count required for the file size
 	fileSize := fileInfo.Size()
@@ -370,7 +370,7 @@ func addMissingFileChunks(t *testing.T, store *filefreezer.Storage, fi *filefree
 	for i := 0; i < fi.ChunkCount; i++ {
 		// if the index is found in the mia list, read and add it to the store
 		if sort.SearchInts(miaList, i) < miaCount {
-			_, err := io.ReadAtLeast(f, buffer, int(store.ChunkSize))
+			readCount, err := io.ReadAtLeast(f, buffer, int(store.ChunkSize))
 			if err != nil {
 				if err == io.EOF {
 					t.Fatalf("Reached EOF of the file when more chunk data was expected in file %s.", fi.FileName)
@@ -384,14 +384,16 @@ func addMissingFileChunks(t *testing.T, store *filefreezer.Storage, fi *filefree
 				}
 			}
 
+			clampedBuffer := buffer[:readCount]
+
 			// hash the chunk
 			hasher := sha1.New()
-			hasher.Write(buffer)
+			hasher.Write(clampedBuffer)
 			hash := hasher.Sum(nil)
 			chunkHash := base64.URLEncoding.EncodeToString(hash)
 
 			// send the data to the store
-			err = store.AddFileChunk(fi.FileID, i, chunkHash, buffer)
+			err = store.AddFileChunk(fi.FileID, i, chunkHash, clampedBuffer)
 			if err != nil {
 				t.Fatalf("Failed to add the chunk to storage for file %s: %v", fi.FileName, err)
 			}
