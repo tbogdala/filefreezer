@@ -153,6 +153,9 @@ func (s *Storage) IsUsernameFree(username string) (bool, error) {
 			return false, nil
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("failed to scan all of the search results for a username: %v", err)
+	}
 
 	return true, nil
 }
@@ -303,6 +306,9 @@ func (s *Storage) GetAllUserFileInfos(userID int) ([]UserFileInfo, error) {
 		fi.UserID = userID
 		result = append(result, fi)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to scan all of the search results for a user's file infos: %v", err)
+	}
 
 	return result, nil
 }
@@ -342,6 +348,9 @@ func (s *Storage) GetMissingChunkNumbersForFile(fileID int) ([]int, error) {
 			return nil, fmt.Errorf("failed to scan the next row while processing files chunks for fileID %d: %v", fileID, err)
 		}
 		knownChunks = append(knownChunks, num)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to scan all of the search results for a username: %v", err)
 	}
 
 	// sort the list so that it can be searched
@@ -438,6 +447,9 @@ func (s *Storage) getRowCount(table string) (int, error) {
 		if err != nil {
 			return 0, err
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("failed to scan all of the search results for the row cound: %v", err)
 	}
 
 	return count, nil
