@@ -15,7 +15,7 @@ import (
 const (
 	createUsersTable = `CREATE TABLE Users (
 		UserID 		INTEGER PRIMARY KEY	NOT NULL,
-		Name		TEXT	UNIQUE		ON CONFLICT ABORT,
+		Name		TEXT	UNIQUE		NOT NULL ON CONFLICT ABORT,
 		Salt		TEXT				NOT NULL,
 		Password	BLOB				NOT NULL
 	);`
