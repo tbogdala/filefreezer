@@ -20,13 +20,9 @@ const (
 		Password	BLOB				NOT NULL
 	);`
 
-	createPermsTable = `CREATE TABLE Perms (
+	createUserStatsTable = `CREATE TABLE UserStats (
 		UserID 		INTEGER PRIMARY KEY	NOT NULL,
-		Quota		INTEGER				NOT NULL
-	);`
-
-	createUserInfoTable = `CREATE TABLE UserInfo (
-		UserID 		INTEGER PRIMARY KEY	NOT NULL,
+		Quota		INTEGER				NOT NULL,
 		Allocated	INTEGER				NOT NULL,
 		Revision	INTEGER				NOT NULL
 	);`
@@ -51,12 +47,10 @@ const (
 	addUser          = `INSERT INTO Users (Name, Salt, Password) VALUES (?, ?, ?);`
 	getUser          = `SELECT UserID, Salt, Password FROM Users  WHERE Name = ?;`
 
-	setUserQuota = `INSERT OR REPLACE INTO Perms (UserID, Quota) VALUES (?, ?);`
-	getUserQuota = `SELECT Quota FROM Perms WHERE UserID = ?;`
-
-	setUserInfo    = `INSERT OR REPLACE INTO UserInfo (UserID, Allocated, Revision) VALUES (?, ?, ?);`
-	getUserInfo    = `SELECT Allocated, Revision FROM UserInfo WHERE UserID = ?;`
-	updateUserInfo = `UPDATE UserInfo SET Allocated = Allocated + (?), Revision = Revision + 1 WHERE UserID = ?;`
+	setUserStats    = `INSERT OR REPLACE INTO UserStats (UserID, Quota, Allocated, Revision) VALUES (?, ?, ?, ?);`
+	getUserStats    = `SELECT Quota, Allocated, Revision FROM UserStats WHERE UserID = ?;`
+	updateUserStats = `UPDATE UserStats SET Allocated = Allocated + (?), Revision = Revision + 1 WHERE UserID = ?;`
+	setUserQuota    = `UPDATE UserStats SET Quota = (?) WHERE UserID = ?;`
 
 	addFileInfo = `INSERT INTO FileInfo (UserID, FileName, LastMod, ChunkCount, FileHash) SELECT ?, ?, ?, ?, ?
 						  WHERE NOT EXISTS (SELECT 1 FROM FileInfo WHERE UserID = ? AND FileName = ?);`
@@ -96,6 +90,13 @@ type User struct {
 	Name       string
 	Salt       string
 	SaltedHash []byte
+}
+
+// UserStats contains the user specific state information to track data usage.
+type UserStats struct {
+	Quota     int
+	Allocated int
+	Revision  int
 }
 
 // Storage is the backend data model for the file storage logic.
@@ -141,14 +142,9 @@ func (s *Storage) CreateTables() error {
 		return fmt.Errorf("failed to create the USERS table: %v", err)
 	}
 
-	_, err = s.db.Exec(createPermsTable)
+	_, err = s.db.Exec(createUserStatsTable)
 	if err != nil {
-		return fmt.Errorf("failed to create the PERMS table: %v", err)
-	}
-
-	_, err = s.db.Exec(createUserInfoTable)
-	if err != nil {
-		return fmt.Errorf("failed to create the USERINFO table: %v", err)
+		return fmt.Errorf("failed to create the USERSTATS table: %v", err)
 	}
 
 	_, err = s.db.Exec(createFileInfoTable)
@@ -198,7 +194,7 @@ func (s *Storage) IsUsernameFree(username string) (bool, error) {
 //
 // This function returns a true bool value if a user was created and false if
 // the user was not created (e.g. username was already taken).
-func (s *Storage) AddUser(username string, salt string, saltedHash []byte) (*User, error) {
+func (s *Storage) AddUser(username string, salt string, saltedHash []byte, quota int) (*User, error) {
 	// insert the user into the table ... username uniqueness is enforced
 	// as a sql ON CONFLICT ABORT which will fail the INSERT and return an err here.
 	res, err := s.db.Exec(addUser, username, salt, saltedHash)
@@ -226,6 +222,13 @@ func (s *Storage) AddUser(username string, salt string, saltedHash []byte) (*Use
 	u.Salt = salt
 	u.SaltedHash = saltedHash
 
+	// with the user added, the user stats row needs to get created with
+	// the quota and usage statistics
+	err = s.SetUserStats(u.ID, quota, 0, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set the new user's stats in the database: %v", err)
+	}
+
 	return u, nil
 }
 
@@ -243,68 +246,70 @@ func (s *Storage) GetUser(username string) (*User, error) {
 }
 
 // SetUserQuota sets the user quota for a user by user id.
-// NOTE: This does not authenticate a user when setting the values!
 func (s *Storage) SetUserQuota(userID int, quota int) error {
-	_, err := s.db.Exec(setUserQuota, userID, quota)
+	res, err := s.db.Exec(setUserQuota, quota, userID)
 	if err != nil {
 		return fmt.Errorf("failed to set the user quota in the database: %v", err)
 	}
 
-	return nil
-}
-
-// GetUserQuota returns the user quota for a user by user id.
-func (s *Storage) GetUserQuota(userID int) (quota int, e error) {
-	err := s.db.QueryRow(getUserQuota, userID).Scan(&quota)
-	if err != nil {
-		e = fmt.Errorf("failed to get the user quota from the database: %v", err)
-		return
-	}
-
-	e = nil
-	return
-}
-
-// SetUserInfo sets the user information for a user by user id.
-// NOTE: This does not authenticate a user when setting the values!
-func (s *Storage) SetUserInfo(userID int, allocated int, revision int) error {
-	_, err := s.db.Exec(setUserInfo, userID, allocated, revision)
-	if err != nil {
-		return fmt.Errorf("failed to set the user info in the database: %v", err)
-	}
-
-	return nil
-}
-
-// UpdateUserInfo increments the user's revision by one and updates the allocated
-// byte counter with the new delta.
-func (s *Storage) UpdateUserInfo(userID int, allocDelta int) error {
-	res, err := s.db.Exec(updateUserInfo, allocDelta, userID)
-	if err != nil {
-		return fmt.Errorf("failed to update the user info in the database: %v", err)
-	}
-
-	// make sure one row was affected with the UPDATE statement
+	// make sure one row was affected
 	affected, err := res.RowsAffected()
 	if affected != 1 {
-		return fmt.Errorf("failed to update the user info in the database; no rows were affected")
+		return fmt.Errorf("failed to set the user stats in the database; no rows were affected")
 	} else if err != nil {
-		return fmt.Errorf("failed to update the user info in the database: %v", err)
+		return fmt.Errorf("failed to set the user stats in the database: %v", err)
 	}
 
 	return nil
 }
 
-// GetUserInfo returns the user information for a user by user id.
-func (s *Storage) GetUserInfo(userID int) (allocated int, revision int, e error) {
-	err := s.db.QueryRow(getUserInfo, userID).Scan(&allocated, &revision)
+// SetUserStats sets the user information for a user by user id and is used to
+// do the first insertion of the user into the stats table.
+func (s *Storage) SetUserStats(userID int, quota int, allocated int, revision int) error {
+	res, err := s.db.Exec(setUserStats, userID, quota, allocated, revision)
 	if err != nil {
-		e = fmt.Errorf("failed to get the user info from the database: %v", err)
-		return
+		return fmt.Errorf("failed to set the user stats in the database: %v", err)
 	}
 
-	e = nil
-	return
+	// make sure one row was affected
+	affected, err := res.RowsAffected()
+	if affected != 1 {
+		return fmt.Errorf("failed to set the user stats in the database; no rows were affected")
+	} else if err != nil {
+		return fmt.Errorf("failed to set the user stats in the database: %v", err)
+	}
+
+	return nil
+}
+
+// UpdateUserStats increments the user's revision by one and updates the allocated
+// byte counter with the new delta.
+func (s *Storage) UpdateUserStats(userID int, allocDelta int) error {
+	res, err := s.db.Exec(updateUserStats, allocDelta, userID)
+	if err != nil {
+		return fmt.Errorf("failed to update the user stats in the database: %v", err)
+	}
+
+	// make sure one row was affected
+	affected, err := res.RowsAffected()
+	if affected != 1 {
+		return fmt.Errorf("failed to update the user stats in the database; no rows were affected")
+	} else if err != nil {
+		return fmt.Errorf("failed to update the user stats in the database: %v", err)
+	}
+
+	return nil
+}
+
+// GetUserStats returns the user information for a user by user id.
+func (s *Storage) GetUserStats(userID int) (*UserStats, error) {
+	stats := new(UserStats)
+	err := s.db.QueryRow(getUserStats, userID).Scan(&stats.Quota, &stats.Allocated, &stats.Revision)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get the user stats from the database: %v", err)
+	}
+
+	return stats, nil
 }
 
 // AddFileInfo registers a new file for a given user which is identified by the filename string.
@@ -485,16 +490,10 @@ func (s *Storage) AddFileChunk(userID int, fileID int, chunkNumber int, chunkHas
 		}
 
 		// get the user's quota fand allocation count and test for a voliation
-		var quota int64
-		err = tx.QueryRow(getUserQuota, userID).Scan(&quota)
+		var quota, allocated, revision int64
+		err = tx.QueryRow(getUserStats, userID).Scan(&quota, &allocated, &revision)
 		if err != nil {
 			return fmt.Errorf("failed to get the user quota from the database before adding file chunk: %v", err)
-		}
-
-		var allocated, revision int64
-		err = tx.QueryRow(getUserInfo, userID).Scan(&allocated, &revision)
-		if err != nil {
-			return fmt.Errorf("failed to get the user info from the database to test allocation count before adding file chunk: %v", err)
 		}
 
 		// fail the transaction if there's not enough allocation space
@@ -516,7 +515,7 @@ func (s *Storage) AddFileChunk(userID int, fileID int, chunkNumber int, chunkHas
 		}
 
 		// update the allocation count
-		res, err = tx.Exec(updateUserInfo, chunkLength, userID)
+		res, err = tx.Exec(updateUserStats, chunkLength, userID)
 		if err != nil {
 			return fmt.Errorf("failed to update the allocated bytes in the database after adding a chunk: %v", err)
 		}
@@ -577,7 +576,7 @@ func (s *Storage) RemoveFileChunk(userID int, fileID int, chunkNumber int) (bool
 		}
 
 		// update the allocation counts
-		res, err = tx.Exec(updateUserInfo, -allocationCount, userID)
+		res, err = tx.Exec(updateUserStats, -allocationCount, userID)
 		if err != nil {
 			return fmt.Errorf("failed to update the allocated bytes in the database after removing a chunk: %v", err)
 		}

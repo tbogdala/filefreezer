@@ -138,7 +138,7 @@ func TestBasicDBCreation(t *testing.T) {
 	setupTestUser(store, "admin", "hamster", t)
 
 	// make sure a duplicate user fails
-	badUser, err := store.AddUser("admin", "99999", []byte{1, 2, 3, 4, 5})
+	badUser, err := store.AddUser("admin", "99999", []byte{1, 2, 3, 4, 5}, 1e9)
 	if err == nil || badUser != nil {
 		t.Fatal("Should have failed to add a duplicate user but did not.")
 	}
@@ -151,17 +151,13 @@ func TestBasicDBCreation(t *testing.T) {
 	if err == nil || badUser != nil {
 		t.Fatal("GetUser succeeded with a user that shouldn't exist in the database.")
 	}
-	_, err = store.GetUserQuota(777)
-	if err == nil {
-		t.Fatal("GetUserQuota succeeded with a user that shouldn't exist in the database.")
+	badInfo, err := store.GetUserStats(777)
+	if err == nil || badInfo != nil {
+		t.Fatal("GetUserStats succeeded with a user that shouldn't exist in the database.")
 	}
-	_, _, err = store.GetUserInfo(777)
+	err = store.UpdateUserStats(777, 512)
 	if err == nil {
-		t.Fatal("GetUserInfo succeeded with a user that shouldn't exist in the database.")
-	}
-	err = store.UpdateUserInfo(777, 512)
-	if err == nil {
-		t.Fatal("UpdateUserInfo succeeded with a user that shouldn't exist in the database.")
+		t.Fatal("UpdateUserStats succeeded with a user that shouldn't exist in the database.")
 	}
 
 	///////////////////////////////////////////////////////////////////////////
@@ -290,7 +286,7 @@ func TestBasicDBCreation(t *testing.T) {
 		t.Fatalf("Missing chunks were found for the file (%s) after uploading them.", second.FileName)
 	}
 
-	beforeDeleteAlloc, beforeDeleteRev, err := store.GetUserInfo(second.UserID)
+	beforeDeleteStats, err := store.GetUserStats(second.UserID)
 	if err != nil {
 		t.Fatalf("Failed to get the user's allocation and revision count: %v", err)
 	}
@@ -304,13 +300,14 @@ func TestBasicDBCreation(t *testing.T) {
 		t.Fatalf("Failed to remove the file chunk from storage: %v", err)
 	}
 
-	afterDeleteAlloc, afterDeleteRev, err := store.GetUserInfo(second.UserID)
+	afterDeleteStats, err := store.GetUserStats(second.UserID)
 	if err != nil {
 		t.Fatalf("Failed to get the user's allocation and revision count: %v", err)
 	}
 
 	// make sure the rev count incremented and allocation count decreased appropriately
-	if beforeDeleteAlloc == afterDeleteAlloc || afterDeleteRev-beforeDeleteRev != 1 {
+	if beforeDeleteStats.Allocated == afterDeleteStats.Allocated ||
+		afterDeleteStats.Revision-beforeDeleteStats.Revision != 1 {
 		t.Fatalf("Failed to update the user's allocation count and revision count after deleting a chunk.")
 	}
 
@@ -383,7 +380,7 @@ func setupTestUser(store *filefreezer.Storage, username string, password string,
 	if err != nil {
 		t.Fatalf("Failed to generate a password hash %v", err)
 	}
-	user, err := store.AddUser(username, salt, saltedPass)
+	user, err := store.AddUser(username, salt, saltedPass, 1e9)
 	if err != nil || user == nil {
 		t.Fatalf("Failed to add a new user (%s) to storage: %v", username, err)
 	}
@@ -407,6 +404,12 @@ func setupTestUser(store *filefreezer.Storage, username string, password string,
 		t.Fatalf("Password verification failed for user (%s) with stored salt and hash.", username)
 	}
 
+	// set the user's information
+	err = store.SetUserStats(user.ID, 1e9, 0, 0)
+	if err != nil {
+		t.Fatalf("Failed to set the user info for %s (id:%d): %v", username, user.ID, err)
+	}
+
 	// set the user's quota
 	err = store.SetUserQuota(user.ID, 1e6)
 	if err != nil {
@@ -420,41 +423,36 @@ func setupTestUser(store *filefreezer.Storage, username string, password string,
 	}
 
 	// make sure we get the correct number when we poll the quota
-	userQuota, err := store.GetUserQuota(user.ID)
-	if err != nil || userQuota != 1e9 {
-		t.Fatalf("Failed to get the user quota for %s (id:%d, v:%d): %v", username, user.ID, userQuota, err)
-	}
-
-	// set the user's information
-	err = store.SetUserInfo(user.ID, 0, 0)
-	if err != nil {
-		t.Fatalf("Failed to set the user info for %s (id:%d): %v", username, user.ID, err)
+	userStats, err := store.GetUserStats(user.ID)
+	if err != nil || userStats == nil || userStats.Quota != 1e9 {
+		t.Fatalf("Failed to get the user quota for %s (id:%d, v:%v): %v", username, user.ID, userStats, err)
 	}
 
 	// test updating it
-	err = store.SetUserInfo(user.ID, 1024, 1)
+	err = store.SetUserStats(user.ID, 1e9, 1024, 1)
 	if err != nil {
 		t.Fatalf("Failed to update the user info for %s (id:%d): %v", username, user.ID, err)
 	}
 
 	// did the full udpate work?
-	alloc, rev, err := store.GetUserInfo(user.ID)
-	if err != nil || alloc != 1024 || rev != 1 {
-		t.Fatalf("Failed to get the user info for %s (id:%d alloc:%d rev:%v): %v", username, user.ID, alloc, rev, err)
+	userStats, err = store.GetUserStats(user.ID)
+	if err != nil || userStats.Allocated != 1024 || userStats.Revision != 1 || userStats.Quota != 1e9 {
+		t.Fatalf("Failed to get the user info for %s (id:%d alloc:%d rev:%v): %v", username, user.ID,
+			userStats.Allocated, userStats.Revision, err)
 	}
 
 	// try applying an allocated byte delta
-	err = store.UpdateUserInfo(user.ID, -1024)
+	err = store.UpdateUserStats(user.ID, -1024)
 	if err != nil {
 		t.Fatalf("Failed to apply a delta to the user info for %s (id:%d): %v", username, user.ID, err)
 	}
 
 	// did the delta udpate work?
-	alloc, rev, err = store.GetUserInfo(user.ID)
-	if err != nil || alloc != 0 || rev != 2 {
-		t.Fatalf("Failed to get the update user info for %s (id:%d alloc:%d rev:%v): %v", username, user.ID, alloc, rev, err)
+	userStats, err = store.GetUserStats(user.ID)
+	if err != nil || userStats.Allocated != 0 || userStats.Revision != 2 || userStats.Quota != 1e9 {
+		t.Fatalf("Failed to get the user info for %s (id:%d alloc:%d rev:%v): %v", username, user.ID,
+			userStats.Allocated, userStats.Revision, err)
 	}
-
 }
 
 func calcFileHashInfo(t *testing.T, maxChunkSize int64, filename string) (chunkCount int, lastMod int64, hashString string) {
@@ -528,7 +526,7 @@ func addMissingFileChunks(store *filefreezer.Storage, fi *filefreezer.FileInfo) 
 			chunkHash := base64.URLEncoding.EncodeToString(hash)
 
 			// check the allocation and revision count
-			startAlloc, startRev, err := store.GetUserInfo(fi.UserID)
+			start, err := store.GetUserStats(fi.UserID)
 			if err != nil {
 				return fmt.Errorf("Failed to get the starting allocation and revision count: %v", err)
 			}
@@ -540,16 +538,16 @@ func addMissingFileChunks(store *filefreezer.Storage, fi *filefreezer.FileInfo) 
 			}
 
 			// check the allocation and revision count
-			endAlloc, endRev, err := store.GetUserInfo(fi.UserID)
+			end, err := store.GetUserStats(fi.UserID)
 			if err != nil {
 				return fmt.Errorf("Failed to get the ending allocation and revision count: %v", err)
 			}
 
 			// this should hold true because this database isn't getting hit by other
 			// requests which could update this between transactions.
-			if endAlloc-startAlloc != len(clampedBuffer) && endRev-startRev == 1 {
+			if end.Allocated-start.Allocated != len(clampedBuffer) && end.Revision-start.Revision == 1 {
 				return fmt.Errorf("Failed to update the user allocation (%d -> %d) and rev count (%d -> %d) for byte count %d",
-					startAlloc, endAlloc, startRev, endRev, len(clampedBuffer))
+					start.Allocated, end.Allocated, start.Revision, end.Revision, len(clampedBuffer))
 			}
 		}
 	}

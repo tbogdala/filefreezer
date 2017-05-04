@@ -38,7 +38,6 @@ TODO / Notes
 * flag: hash on start instead of just checking mod time
 
 * make sure it only adds files automatically, not symlinks
-* consider transation around getmissingchunknums
 
 
 Workflows
@@ -94,9 +93,8 @@ Notes: GetFileChunk(id, chunk number) may return nothing if the server doesn't h
 Database Requirements
 ---------------------
 
-* USERS = user id | username | pw hash | salt
-* PERMS = user id | bytes quota
-* USERINFO = user id | bytes allocated | revision count
+* USERS = user id | username | pw hash | salted hash
+* USERINFO = user id | bytes  quota | bytes allocated | revision count
 * FILEINFO = file id | owning user id | file name (path) | last mod time | chunk count | whole file hash
 * FILECHUNKS = file id | chunk number (local to each file [0..]) | chunk hash | chunk binary
 
