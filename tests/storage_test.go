@@ -532,9 +532,16 @@ func addMissingFileChunks(store *filefreezer.Storage, fi *filefreezer.FileInfo) 
 			}
 
 			// send the data to the store
-			err = store.AddFileChunk(fi.UserID, fi.FileID, i, chunkHash, clampedBuffer)
+			newChunk, err := store.AddFileChunk(fi.UserID, fi.FileID, i, chunkHash, clampedBuffer)
 			if err != nil {
 				return fmt.Errorf("Failed to add the chunk to storage for file %s: %v", fi.FileName, err)
+			}
+
+			// make sure the new object has the correct values
+			if newChunk == nil || newChunk.FileID != fi.FileID || newChunk.ChunkNumber != i ||
+				newChunk.ChunkHash != chunkHash || bytes.Compare(newChunk.Chunk, clampedBuffer) != 0 {
+				return fmt.Errorf("new chunk object returned from Storage.AddFileChunk had incorrect field values (%d, %d, %s) vs (%d, %d, %s)",
+					fi.FileID, i, chunkHash, newChunk.FileID, newChunk.ChunkNumber, newChunk.ChunkHash)
 			}
 
 			// check the allocation and revision count

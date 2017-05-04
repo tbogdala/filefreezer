@@ -376,8 +376,10 @@ func (s *Storage) GetAllUserFileInfos(userID int) ([]FileInfo, error) {
 
 // GetFileInfo returns a UserFileInfo object that describes the file identified
 // by the fileID parameter. If this query was unsuccessful an error is returned.
-func (s *Storage) GetFileInfo(userID int, fileID int) (fi FileInfo, e error) {
-	e = s.transact(func(tx *sql.Tx) error {
+func (s *Storage) GetFileInfo(userID int, fileID int) (*FileInfo, error) {
+	fi := new(FileInfo)
+	fi.FileID = fileID
+	err := s.transact(func(tx *sql.Tx) error {
 		// check to make sure the user owns the file id
 		var owningUserID int
 		err := tx.QueryRow(getFileInfoOwner, fileID).Scan(&owningUserID)
@@ -393,12 +395,13 @@ func (s *Storage) GetFileInfo(userID int, fileID int) (fi FileInfo, e error) {
 			return err
 		}
 
-		fi.FileID = fileID
-
 		return nil
 	})
 
-	return
+	if err != nil {
+		return nil, err
+	}
+	return fi, nil
 }
 
 // GetMissingChunkNumbersForFile will return a slice of chunk numbers that have
@@ -470,14 +473,15 @@ func (s *Storage) GetMissingChunkNumbersForFile(userID int, fileID int) ([]int, 
 // AddFileChunk adds a binary chunk to storage for a given file at a position in the file
 // determined by the chunkNumber passed in and identified by the chunkHash. The userID is used
 // to update the allocation count in the same transaction as well as verify ownership.
-func (s *Storage) AddFileChunk(userID int, fileID int, chunkNumber int, chunkHash string, chunk []byte) error {
+func (s *Storage) AddFileChunk(userID int, fileID int, chunkNumber int, chunkHash string, chunk []byte) (*FileChunk, error) {
 	chunkLength := int64(len(chunk))
 
 	// sanity check the length of the chunk
 	if chunkLength > s.ChunkSize {
-		return fmt.Errorf("chunk supplied is %d bytes long and the server is using a max size of %d", len(chunk), s.ChunkSize)
+		return nil, fmt.Errorf("chunk supplied is %d bytes long and the server is using a max size of %d", len(chunk), s.ChunkSize)
 	}
 
+	newChunk := new(FileChunk)
 	err := s.transact(func(tx *sql.Tx) error {
 		// check to make sure the user owns the file id
 		var owningUserID int
@@ -527,11 +531,18 @@ func (s *Storage) AddFileChunk(userID int, fileID int, chunkNumber int, chunkHas
 			return fmt.Errorf("failed to update the user info in the database after adding a chunk: %v", err)
 		}
 
+		newChunk.FileID = fileID
+		newChunk.ChunkNumber = chunkNumber
+		newChunk.ChunkHash = chunkHash
+		newChunk.Chunk = chunk
 		return nil
 	})
 
 	// return the error, if any, from running the transaction
-	return err
+	if err != nil {
+		return nil, err
+	}
+	return newChunk, nil
 }
 
 // RemoveFileChunk removes a chunk from storage identifed by the fileID and chunkNumber.
@@ -601,7 +612,8 @@ func (s *Storage) RemoveFileChunk(userID int, fileID int, chunkNumber int) (bool
 
 // GetFileChunk retrieves a file chunk from storage and returns it. An error value
 // is returned on failure.
-func (s *Storage) GetFileChunk(fileID int, chunkNumber int) (fc FileChunk, e error) {
+func (s *Storage) GetFileChunk(fileID int, chunkNumber int) (fc *FileChunk, e error) {
+	fc = new(FileChunk)
 	fc.FileID = fileID
 	fc.ChunkNumber = chunkNumber
 
