@@ -71,6 +71,33 @@ const (
 	getFileChunk    = `SELECT ChunkHash, Chunk FROM FileChunks WHERE FileID = ? AND ChunkNum = ?;`
 )
 
+// FileInfo contains the information stored about a given file for a particular user.
+type FileInfo struct {
+	UserID     int
+	FileID     int
+	FileName   string
+	LastMod    int64
+	ChunkCount int
+	FileHash   string
+}
+
+// FileChunk contains the information stored about a given file chunk.
+type FileChunk struct {
+	FileID      int
+	ChunkNumber int
+	ChunkHash   string
+	Chunk       []byte
+}
+
+// User contains the basic information stored about a use, but does not
+// include current allocation or revision statistics.
+type User struct {
+	ID         int
+	Name       string
+	Salt       string
+	SaltedHash []byte
+}
+
 // Storage is the backend data model for the file storage logic.
 type Storage struct {
 	// ChunkSize is the number of bytes the chunk can maximally be
@@ -171,28 +198,48 @@ func (s *Storage) IsUsernameFree(username string) (bool, error) {
 //
 // This function returns a true bool value if a user was created and false if
 // the user was not created (e.g. username was already taken).
-func (s *Storage) AddUser(username string, salt string, saltedHash []byte) (bool, error) {
+func (s *Storage) AddUser(username string, salt string, saltedHash []byte) (*User, error) {
 	// insert the user into the table ... username uniqueness is enforced
 	// as a sql ON CONFLICT ABORT which will fail the INSERT and return an err here.
-	_, err := s.db.Exec(addUser, username, salt, saltedHash)
+	res, err := s.db.Exec(addUser, username, salt, saltedHash)
 	if err != nil {
-		return false, fmt.Errorf("failed to insert the new user (%s): %v", username, err)
+		return nil, fmt.Errorf("failed to insert the new user (%s): %v", username, err)
 	}
 
-	return true, nil
+	// make sure one row was affected
+	affected, err := res.RowsAffected()
+	if affected != 1 {
+		return nil, fmt.Errorf("failed to add a new user in the database; no rows were affected")
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to add a new user in the database: %v", err)
+	}
+
+	insertedID, err := res.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get the id for the last row inserted while adding a new user into the database: %v", err)
+	}
+
+	// generate a new UserFileInfo that contains the ID for the file just added to the database
+	u := new(User)
+	u.ID = int(insertedID)
+	u.Name = username
+	u.Salt = salt
+	u.SaltedHash = saltedHash
+
+	return u, nil
 }
 
 // GetUser queries the Users table for a given username and returns the associated data.
 // If the query fails and error will be returned.
-func (s *Storage) GetUser(username string) (id int, salt string, saltedHash []byte, e error) {
-	err := s.db.QueryRow(getUser, username).Scan(&id, &salt, &saltedHash)
+func (s *Storage) GetUser(username string) (*User, error) {
+	user := new(User)
+	user.Name = username
+	err := s.db.QueryRow(getUser, username).Scan(&user.ID, &user.Salt, &user.SaltedHash)
 	if err != nil {
-		e = fmt.Errorf("failed to get the user information from the database: %v", err)
-		return
+		return nil, fmt.Errorf("failed to get the user information from the database: %v", err)
 	}
 
-	e = nil
-	return
+	return user, nil
 }
 
 // SetUserQuota sets the user quota for a user by user id.
@@ -264,7 +311,7 @@ func (s *Storage) GetUserInfo(userID int) (allocated int, revision int, e error)
 // lastmod (time in seconds since 1/1/1970) and the filehash string are provided as well. The
 // chunkCount parameter should be the number of chunks required for the size of the file. If the
 // file could not be added an error is returned, otherwise nil on success.
-func (s *Storage) AddFileInfo(userID int, filename string, lastMod int64, chunkCount int, fileHash string) (*UserFileInfo, error) {
+func (s *Storage) AddFileInfo(userID int, filename string, lastMod int64, chunkCount int, fileHash string) (*FileInfo, error) {
 	res, err := s.db.Exec(addFileInfo, userID, filename, lastMod, chunkCount, fileHash, userID, filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add a new file info in the database: %v", err)
@@ -284,7 +331,7 @@ func (s *Storage) AddFileInfo(userID int, filename string, lastMod int64, chunkC
 	}
 
 	// generate a new UserFileInfo that contains the ID for the file just added to the database
-	fi := new(UserFileInfo)
+	fi := new(FileInfo)
 	fi.ChunkCount = chunkCount
 	fi.FileHash = fileHash
 	fi.FileID = int(insertedID)
@@ -295,19 +342,9 @@ func (s *Storage) AddFileInfo(userID int, filename string, lastMod int64, chunkC
 	return fi, nil
 }
 
-// UserFileInfo contains the information stored about a given file for a particular user.
-type UserFileInfo struct {
-	UserID     int
-	FileID     int
-	FileName   string
-	LastMod    int64
-	ChunkCount int
-	FileHash   string
-}
-
 // GetAllUserFileInfos returns a slice of UserFileInfo objects that describe all known
 // files in storage for a given user ID. If this query was unsuccessful and error is returned.
-func (s *Storage) GetAllUserFileInfos(userID int) ([]UserFileInfo, error) {
+func (s *Storage) GetAllUserFileInfos(userID int) ([]FileInfo, error) {
 	rows, err := s.db.Query(getAllUserFiles, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all of the file infos from the database: %v", err)
@@ -315,9 +352,9 @@ func (s *Storage) GetAllUserFileInfos(userID int) ([]UserFileInfo, error) {
 	defer rows.Close()
 
 	// iterate over the returned rows to create a new slice of file info objects
-	result := []UserFileInfo{}
+	result := []FileInfo{}
 	for rows.Next() {
-		var fi UserFileInfo
+		var fi FileInfo
 		err := rows.Scan(&fi.FileID, &fi.FileName, &fi.LastMod, &fi.ChunkCount, &fi.FileHash)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan the next row while processing user file infos: %v", err)
@@ -334,7 +371,7 @@ func (s *Storage) GetAllUserFileInfos(userID int) ([]UserFileInfo, error) {
 
 // GetFileInfo returns a UserFileInfo object that describes the file identified
 // by the fileID parameter. If this query was unsuccessful an error is returned.
-func (s *Storage) GetFileInfo(userID int, fileID int) (fi UserFileInfo, e error) {
+func (s *Storage) GetFileInfo(userID int, fileID int) (fi FileInfo, e error) {
 	e = s.transact(func(tx *sql.Tx) error {
 		// check to make sure the user owns the file id
 		var owningUserID int
@@ -362,7 +399,7 @@ func (s *Storage) GetFileInfo(userID int, fileID int) (fi UserFileInfo, e error)
 // GetMissingChunkNumbersForFile will return a slice of chunk numbers that have
 // not been added for a given file.
 func (s *Storage) GetMissingChunkNumbersForFile(userID int, fileID int) ([]int, error) {
-	var fi UserFileInfo
+	var fi FileInfo
 	knownChunks := []int{}
 	err := s.transact(func(tx *sql.Tx) error {
 		// check to make sure the user owns the file id
@@ -561,14 +598,6 @@ func (s *Storage) RemoveFileChunk(userID int, fileID int, chunkNumber int) (bool
 		return false, err
 	}
 	return true, nil
-}
-
-// FileChunk contains the information stored about a given file chunk.
-type FileChunk struct {
-	FileID      int
-	ChunkNumber int
-	ChunkHash   string
-	Chunk       []byte
 }
 
 // GetFileChunk retrieves a file chunk from storage and returns it. An error value

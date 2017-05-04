@@ -46,24 +46,30 @@ func TestQuotasAndPermissions(t *testing.T) {
 	setupTestUser(store, "admin2", "hamster2", t)
 
 	// set the user's quota to something rediculously small
-	userID, _, _, _ := store.GetUser("admin")
-	user2ID, _, _, _ := store.GetUser("admin2")
-	err = store.SetUserQuota(userID, 100)
+	user, err := store.GetUser("admin")
 	if err != nil {
-		t.Fatalf("Failed to set the user quota for (id:%d): %v", userID, err)
+		t.Fatalf("Failed to get the user: %v", err)
+	}
+	user2, err := store.GetUser("admin2")
+	if err != nil {
+		t.Fatalf("Failed to get the user: %v", err)
+	}
+	err = store.SetUserQuota(user.ID, 100)
+	if err != nil {
+		t.Fatalf("Failed to set the user quota for (id:%d): %v", user.ID, err)
 	}
 
 	filename := "../storage.go"
 	chunkCount, lastMod, hashString := calcFileHashInfo(t, store.ChunkSize, filename)
 
 	// add the file information to the storage server
-	fi, err := store.AddFileInfo(userID, filename, lastMod, chunkCount, hashString)
+	fi, err := store.AddFileInfo(user.ID, filename, lastMod, chunkCount, hashString)
 	if err != nil {
 		t.Fatalf("Failed to add a new file (%s): %v", filename, err)
 	}
 
 	// track the number of missing chunks before we fail the next test
-	originalMiaList, err := store.GetMissingChunkNumbersForFile(userID, fi.FileID)
+	originalMiaList, err := store.GetMissingChunkNumbersForFile(user.ID, fi.FileID)
 
 	// make sure that uploading a file fails
 	err = addMissingFileChunks(store, fi)
@@ -72,33 +78,33 @@ func TestQuotasAndPermissions(t *testing.T) {
 	}
 
 	// make sure we're still missing the same number of chunks
-	secondMiaList, err := store.GetMissingChunkNumbersForFile(userID, fi.FileID)
+	secondMiaList, err := store.GetMissingChunkNumbersForFile(user.ID, fi.FileID)
 	if len(originalMiaList) != len(secondMiaList) {
 		t.Fatal("The number of chunks missing for a file should have been the same after a failed upload.")
 	}
 
 	// reset the quota
-	err = store.SetUserQuota(userID, 1e9)
+	err = store.SetUserQuota(user.ID, 1e9)
 	if err != nil {
-		t.Fatalf("Failed to set the user quota for (id:%d): %v", userID, err)
+		t.Fatalf("Failed to set the user quota for (id:%d): %v", user.ID, err)
 	}
 
 	// test to make sure you cannot upload file chunks for files not assigned to the user ID supplied
-	fi.UserID = user2ID
+	fi.UserID = user2.ID
 	err = addMissingFileChunks(store, fi)
 	if err == nil {
 		t.Fatal("Failed to halt a file chunk upload for chunks not belonging to the user.")
 	}
 
 	// reset the user id and upload the file chunks
-	fi.UserID = userID
+	fi.UserID = user.ID
 	err = addMissingFileChunks(store, fi)
 	if err != nil {
 		t.Fatalf("Error while uploading missing file parts for a user: %v", err)
 	}
 
 	// now attempt to delete a chunk with a bad user id
-	deleted, err := store.RemoveFileChunk(user2ID, fi.FileID, fi.ChunkCount-1)
+	deleted, err := store.RemoveFileChunk(user2.ID, fi.FileID, fi.ChunkCount-1)
 	if deleted {
 		t.Fatal("Removed the file chunk from storage with a non-owner user id")
 	}
@@ -132,8 +138,8 @@ func TestBasicDBCreation(t *testing.T) {
 	setupTestUser(store, "admin", "hamster", t)
 
 	// make sure a duplicate user fails
-	success, err := store.AddUser("admin", "99999", []byte{1, 2, 3, 4, 5})
-	if err == nil || success {
+	badUser, err := store.AddUser("admin", "99999", []byte{1, 2, 3, 4, 5})
+	if err == nil || badUser != nil {
 		t.Fatal("Should have failed to add a duplicate user but did not.")
 	}
 
@@ -141,8 +147,8 @@ func TestBasicDBCreation(t *testing.T) {
 	setupTestUser(store, "admin2", "hamster2", t)
 
 	// these calls for made up users should fail
-	_, _, _, err = store.GetUser("ghost")
-	if err == nil {
+	badUser, err = store.GetUser("ghost")
+	if err == nil || badUser != nil {
 		t.Fatal("GetUser succeeded with a user that shouldn't exist in the database.")
 	}
 	_, err = store.GetUserQuota(777)
@@ -162,8 +168,8 @@ func TestBasicDBCreation(t *testing.T) {
 	// File manipulation
 
 	// get user credentials
-	user := "admin"
-	userID, _, _, err := store.GetUser(user)
+	username := "admin"
+	user, err := store.GetUser(username)
 	if err != nil {
 		t.Fatal("GetUser failed to get the admin test user.")
 	}
@@ -173,21 +179,21 @@ func TestBasicDBCreation(t *testing.T) {
 	chunkCount, lastMod, hashString := calcFileHashInfo(t, store.ChunkSize, filename)
 
 	// add the file information to the storage server
-	_, err = store.AddFileInfo(userID, filename, lastMod, chunkCount, hashString)
+	_, err = store.AddFileInfo(user.ID, filename, lastMod, chunkCount, hashString)
 	if err != nil {
 		t.Fatalf("Failed to add a new file (%s): %v", filename, err)
 	}
 
 	// get all the file info objects
-	fileInfos, err := store.GetAllUserFileInfos(userID)
+	fileInfos, err := store.GetAllUserFileInfos(user.ID)
 	if err != nil {
-		t.Fatalf("Failed to get all of the user (id:%d) file infos in storage: %v", userID, err)
+		t.Fatalf("Failed to get all of the user (id:%d) file infos in storage: %v", user.ID, err)
 	}
 	if len(fileInfos) != 1 {
-		t.Fatalf("Returned the wrong number of file infos (%d) for a user (id:%d).", len(fileInfos), userID)
+		t.Fatalf("Returned the wrong number of file infos (%d) for a user (id:%d).", len(fileInfos), user.ID)
 	}
 	first := fileInfos[0]
-	if first.UserID != userID || first.FileID != 1 || first.FileName != filename ||
+	if first.UserID != user.ID || first.FileID != 1 || first.FileName != filename ||
 		first.ChunkCount != chunkCount || first.LastMod != lastMod || first.FileHash != hashString {
 		t.Fatalf("The file information returned %s was incorrect: %v", filename, first)
 	}
@@ -217,18 +223,18 @@ func TestBasicDBCreation(t *testing.T) {
 	chunkCount, lastMod, hashString = calcFileHashInfo(t, store.ChunkSize, filename)
 
 	// add the file information to the storage server
-	_, err = store.AddFileInfo(userID, filename, lastMod, chunkCount, hashString)
+	_, err = store.AddFileInfo(user.ID, filename, lastMod, chunkCount, hashString)
 	if err != nil {
 		t.Fatalf("Failed to add a new file (%s): %v", filename, err)
 	}
 
 	// get all the file info objects again
-	fileInfos, err = store.GetAllUserFileInfos(userID)
+	fileInfos, err = store.GetAllUserFileInfos(user.ID)
 	if err != nil {
-		t.Fatalf("Failed to get all of the user (id:%d) file infos in storage: %v", userID, err)
+		t.Fatalf("Failed to get all of the user (id:%d) file infos in storage: %v", user.ID, err)
 	}
 	if len(fileInfos) != 2 {
-		t.Fatalf("Returned the wrong number of file infos (%d) for a user (id:%d).", len(fileInfos), userID)
+		t.Fatalf("Returned the wrong number of file infos (%d) for a user (id:%d).", len(fileInfos), user.ID)
 	}
 	first = fileInfos[0]
 	second := fileInfos[1]
@@ -236,7 +242,7 @@ func TestBasicDBCreation(t *testing.T) {
 		first = fileInfos[1]
 		second = fileInfos[0]
 	}
-	if second.FileName != filename || second.FileID != 2 || second.UserID != userID ||
+	if second.FileName != filename || second.FileID != 2 || second.UserID != user.ID ||
 		second.LastMod != lastMod || second.FileHash != hashString || second.ChunkCount != chunkCount {
 		t.Fatalf("Failed to get the added file (%s) using GetAllUserFileInfos().", filename)
 	}
@@ -371,82 +377,82 @@ func TestBasicDBCreation(t *testing.T) {
 
 // split the testing process of adding a user into a separate functions so that
 // it's easier to add multiple users.
-func setupTestUser(store *filefreezer.Storage, user string, password string, t *testing.T) {
+func setupTestUser(store *filefreezer.Storage, username string, password string, t *testing.T) {
 	// attempt to add a user
 	salt, saltedPass, err := filefreezer.GenSaltedHash(password)
 	if err != nil {
 		t.Fatalf("Failed to generate a password hash %v", err)
 	}
-	success, err := store.AddUser(user, salt, saltedPass)
-	if err != nil || !success {
-		t.Fatalf("Failed to add a new user (%s) to storage: %v", user, err)
+	user, err := store.AddUser(username, salt, saltedPass)
+	if err != nil || user == nil {
+		t.Fatalf("Failed to add a new user (%s) to storage: %v", username, err)
 	}
 
 	// verify the correct information for this user can be retrieved
-	userID, userSalt, userSaltedHash, err := store.GetUser(user)
+	userDupe, err := store.GetUser(user.Name)
 	if err != nil {
-		t.Fatalf("Failed to get the user (%s ; id:%d) info from storage: %v", user, userID, err)
+		t.Fatalf("Failed to get the user (%s ; id:%d) info from storage: %v", user.Name, user.ID, err)
 	}
-	if userSalt != salt || bytes.Compare(userSaltedHash, saltedPass) != 0 {
+	if userDupe.Salt != salt || bytes.Compare(userDupe.SaltedHash, saltedPass) != 0 {
 		t.Fatalf("Failed to get the correct user (%s) info from storage: \n\t%s | %v\n\t%s | %v",
-			user, userSalt, userSaltedHash, salt, saltedPass)
+			username, userDupe.Salt, userDupe.SaltedHash, salt, saltedPass)
 	}
-	if !filefreezer.VerifyPassword(password, userSalt, userSaltedHash) {
-		t.Fatalf("Password verification failed for user (%s) with stored salt and hash.", user)
+	if !filefreezer.VerifyPassword(password, userDupe.Salt, userDupe.SaltedHash) {
+		t.Fatalf("Password verification failed for user (%s) with stored salt and hash.", username)
 	}
 
 	// make sure password verification fails with some change to the salted hash
 	bogusHash := bytes.Repeat([]byte{42}, 42)
-	if filefreezer.VerifyPassword(password, userSalt, bogusHash) {
-		t.Fatalf("Password verification failed for user (%s) with stored salt and hash.", user)
+	if filefreezer.VerifyPassword(password, userDupe.Salt, bogusHash) {
+		t.Fatalf("Password verification failed for user (%s) with stored salt and hash.", username)
 	}
 
 	// set the user's quota
-	err = store.SetUserQuota(userID, 1e6)
+	err = store.SetUserQuota(user.ID, 1e6)
 	if err != nil {
-		t.Fatalf("Failed to set the user quota for %s (id:%d): %v", user, userID, err)
+		t.Fatalf("Failed to set the user quota for %s (id:%d): %v", username, user.ID, err)
 	}
 
 	// now set the user quota to the right ammound
-	err = store.SetUserQuota(userID, 1e9)
+	err = store.SetUserQuota(user.ID, 1e9)
 	if err != nil {
-		t.Fatalf("Failed to update the user quota for %s (id:%d): %v", user, userID, err)
+		t.Fatalf("Failed to update the user quota for %s (id:%d): %v", username, user.ID, err)
 	}
 
 	// make sure we get the correct number when we poll the quota
-	userQuota, err := store.GetUserQuota(userID)
+	userQuota, err := store.GetUserQuota(user.ID)
 	if err != nil || userQuota != 1e9 {
-		t.Fatalf("Failed to get the user quota for %s (id:%d, v:%d): %v", user, userID, userQuota, err)
+		t.Fatalf("Failed to get the user quota for %s (id:%d, v:%d): %v", username, user.ID, userQuota, err)
 	}
 
 	// set the user's information
-	err = store.SetUserInfo(userID, 0, 0)
+	err = store.SetUserInfo(user.ID, 0, 0)
 	if err != nil {
-		t.Fatalf("Failed to set the user info for %s (id:%d): %v", user, userID, err)
+		t.Fatalf("Failed to set the user info for %s (id:%d): %v", username, user.ID, err)
 	}
 
 	// test updating it
-	err = store.SetUserInfo(userID, 1024, 1)
+	err = store.SetUserInfo(user.ID, 1024, 1)
 	if err != nil {
-		t.Fatalf("Failed to update the user info for %s (id:%d): %v", user, userID, err)
+		t.Fatalf("Failed to update the user info for %s (id:%d): %v", username, user.ID, err)
 	}
 
 	// did the full udpate work?
-	alloc, rev, err := store.GetUserInfo(userID)
+	alloc, rev, err := store.GetUserInfo(user.ID)
 	if err != nil || alloc != 1024 || rev != 1 {
-		t.Fatalf("Failed to get the user info for %s (id:%d alloc:%d rev:%v): %v", user, userID, alloc, rev, err)
+		t.Fatalf("Failed to get the user info for %s (id:%d alloc:%d rev:%v): %v", username, user.ID, alloc, rev, err)
 	}
 
 	// try applying an allocated byte delta
-	err = store.UpdateUserInfo(userID, -1024)
+	err = store.UpdateUserInfo(user.ID, -1024)
 	if err != nil {
-		t.Fatalf("Failed to apply a delta to the user info for %s (id:%d): %v", user, userID, err)
+		t.Fatalf("Failed to apply a delta to the user info for %s (id:%d): %v", username, user.ID, err)
 	}
 
 	// did the delta udpate work?
-	alloc, rev, err = store.GetUserInfo(userID)
+	alloc, rev, err = store.GetUserInfo(user.ID)
 	if err != nil || alloc != 0 || rev != 2 {
-		t.Fatalf("Failed to get the update user info for %s (id:%d alloc:%d rev:%v): %v", user, userID, alloc, rev, err)
+		t.Fatalf("Failed to get the update user info for %s (id:%d alloc:%d rev:%v): %v", username, user.ID, alloc, rev, err)
 	}
 
 }
@@ -476,7 +482,7 @@ func calcFileHashInfo(t *testing.T, maxChunkSize int64, filename string) (chunkC
 	return
 }
 
-func addMissingFileChunks(store *filefreezer.Storage, fi *filefreezer.UserFileInfo) error {
+func addMissingFileChunks(store *filefreezer.Storage, fi *filefreezer.FileInfo) error {
 	miaList, err := store.GetMissingChunkNumbersForFile(fi.UserID, fi.FileID)
 	if err != nil {
 		return fmt.Errorf("Could not get a list of missing chunks for the file (%s): %v", fi.FileName, err)
