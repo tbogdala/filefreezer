@@ -4,10 +4,12 @@
 package routes
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/tbogdala/filefreezer"
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
 )
 
@@ -20,7 +22,7 @@ func InitRoutes(state *models.State) *mux.Router {
 	r.Handle("/api/users/login", handleUsersLogin(state)).Methods("POST")
 
 	// returns all files and their whole-file hash
-	//r.Handle("/api/files", context.ClearHandler(authenticateToken(handleNotepadsNew(ctx)))).Methods("POST") // create
+	r.Handle("/api/files", authenticateToken(state, handleGetAllFiles(state))).Methods("GET")
 
 	// returns a file chunk list with hashes
 	// /api/file/{id}
@@ -66,6 +68,61 @@ func handleUsersLogin(state *models.State) http.HandlerFunc {
 
 		writeJSONResponse(w, token)
 	}
+}
+
+// AllFilesGetResponse is the JSON serializable response given by the
+// /api/files GET handlder.
+type AllFilesGetResponse struct {
+	Files []filefreezer.FileInfo
+}
+
+func handleGetAllFiles(state *models.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
+		if userCredsI == nil {
+			http.Error(w, "Failed to get the user credentials", http.StatusUnauthorized)
+			return
+		}
+		userCreds := userCredsI.(*userCredentialsContext)
+
+		// pull down all the fileinfo objects for a user
+		allFileInfos, err := state.Storage.GetAllUserFileInfos(userCreds.ID)
+		if err != nil {
+			http.Error(w, "Failed to get files for the user", http.StatusNotFound)
+			return
+		}
+
+		writeJSONResponse(w, &AllFilesGetResponse{
+			Files: allFileInfos,
+		})
+	}
+}
+
+type userCredentialsContextKey string
+type userCredentialsContext struct {
+	ID   int
+	Name string
+}
+
+// authenticateToken middleware calls out to the auth module to authenticate
+// the token contained in the header of the response to ensure user credentials
+// before calling the next handler.
+func authenticateToken(state *models.State, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// validate the token
+		token, err := state.Authorizor.VerifyToken(r)
+		if err != nil || token == nil {
+			http.Error(w, "Failed to authenticate.", http.StatusForbidden)
+			return
+		}
+		username, userid := state.Authorizor.GetUserFromToken(token)
+		creds := &userCredentialsContext{userid, username}
+
+		// authenticated, so proceed to next handler
+		ctx := r.Context()
+		next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, userCredentialsContextKey("UserCredentials"), creds)))
+	})
 }
 
 // writeJSONResponse marshals the generic data object into JSON and then

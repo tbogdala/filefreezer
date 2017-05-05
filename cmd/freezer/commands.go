@@ -81,6 +81,10 @@ func runModUser(username string, password string, quota int) {
 	log.Println("User modified successfully")
 }
 
+func runGetAllFileHashes() {
+
+}
+
 func runServe(dbPath string, publicKeyPath string, privateKeyPath string) {
 	// newState does the setup for the initial state of the server
 	newState := func() (*models.State, error) {
@@ -109,7 +113,7 @@ func runServe(dbPath string, publicKeyPath string, privateKeyPath string) {
 		}
 
 		// assign the token generator
-		s.Authorizor, err = NewJWTAuthenticator(s.Storage, s.SignKey)
+		s.Authorizor, err = NewJWTAuthenticator(s.Storage, s.SignKey, s.VerifyKey)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to create the JWT token generator: %v", err)
 		}
