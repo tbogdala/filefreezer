@@ -46,6 +46,7 @@ const (
 	lookupUserByName = `SELECT Name FROM Users WHERE Name = ?;`
 	addUser          = `INSERT INTO Users (Name, Salt, Password) VALUES (?, ?, ?);`
 	getUser          = `SELECT UserID, Salt, Password FROM Users  WHERE Name = ?;`
+	updateUser       = `UPDATE Users SET Salt = ?, Password = ? WHERE UserID = ?;`
 
 	setUserStats    = `INSERT OR REPLACE INTO UserStats (UserID, Quota, Allocated, Revision) VALUES (?, ?, ?, ?);`
 	getUserStats    = `SELECT Quota, Allocated, Revision FROM UserStats WHERE UserID = ?;`
@@ -243,6 +244,32 @@ func (s *Storage) GetUser(username string) (*User, error) {
 	}
 
 	return user, nil
+}
+
+// UpdateUser changes the salt, saltedHash and quota for a given userID. This will fail
+// if the userID doesn't exist.
+func (s *Storage) UpdateUser(userID int, salt string, saltedHash []byte, quota int) error {
+	res, err := s.db.Exec(updateUser, salt, saltedHash, userID)
+	if err != nil {
+		return fmt.Errorf("failed to update the user (%d): %v", userID, err)
+	}
+
+	// make sure one row was affected
+	affected, err := res.RowsAffected()
+	if affected != 1 {
+		return fmt.Errorf("failed to update user in the database; no rows were affected")
+	} else if err != nil {
+		return fmt.Errorf("failed to update user in the database: %v", err)
+	}
+
+	// with the user added, the user stats row needs to get created with
+	// the quota and usage statistics
+	err = s.SetUserQuota(userID, quota)
+	if err != nil {
+		return fmt.Errorf("failed to set the user's updated quota in the database: %v", err)
+	}
+
+	return nil
 }
 
 // SetUserQuota sets the user quota for a user by user id.

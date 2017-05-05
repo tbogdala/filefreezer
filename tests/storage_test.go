@@ -146,6 +146,24 @@ func TestBasicDBCreation(t *testing.T) {
 	// a second, legit user should be okay
 	setupTestUser(store, "admin2", "hamster2", t)
 
+	// test to make sure we can update a user password, hash and quota
+	user3, err := store.AddUser("admin3", "1234", []byte{1, 2, 3, 4}, 1e9)
+	if err != nil {
+		t.Fatalf("Failed to create the admin3 test user: %v", err)
+	}
+	err = store.UpdateUser(user3.ID, "5678", []byte{5, 6, 7, 8}, 10)
+	if err != nil {
+		t.Fatalf("Failed to update the user password and quota data: %v", err)
+	}
+	user3Test, err := store.GetUser("admin3")
+	if err != nil || user3Test.ID != user3.ID || user3Test.Salt != "5678" || bytes.Compare(user3Test.SaltedHash, []byte{5, 6, 7, 8}) != 0 {
+		t.Fatalf("Failed to update the user's password and hash.")
+	}
+	user3Stats, err := store.GetUserStats(user3.ID)
+	if err != nil || user3Stats.Quota != 10 {
+		t.Fatalf("Failed to update the user's quota: %v", err)
+	}
+
 	// these calls for made up users should fail
 	badUser, err = store.GetUser("ghost")
 	if err == nil || badUser != nil {
