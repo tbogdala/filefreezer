@@ -12,6 +12,26 @@ Features
 
 Mid-development commit with a lot of work still going into it.
 
+Installation
+------------
+
+The following dependencies will need to be installed:
+
+```bash
+go get github.com/dgrijalva/jwt-go
+go get github.com/gorilla/mux
+go get gopkg.in/alecthomas/kingpin.v2
+
+```
+
+RSA keys for JWT token signing can be created with openssl:
+
+```bash
+cd cmd/freezer
+ssh-keygen -t rsa -b 4096 -f freezer.rsa
+openssl rsa -in freezer.rsa -pubout -outform PEM -out freezer.rsa.pub
+```
+
 TODO / Notes
 ------------
 
@@ -23,15 +43,10 @@ TODO / Notes
   * bcrypt2 (salt + pw hash) stored in database
   * ref: https://crackstation.net/hashing-security.htm
 
-* setup net/http to use HTTPS
-
-* create user authentication
-
 * server testing considerations
   * make authentication an interface for a dummy test replacement
   * make a filesystem interface dummy for testing
 
-* flag: default quota amount
 * flag: file hashing algo
 * flag: max chunk size (default 4MB)
 * flag: encrypt files

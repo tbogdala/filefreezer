@@ -242,6 +242,12 @@ func TestBasicDBCreation(t *testing.T) {
 		t.Fatalf("Failed to add a new file (%s): %v", filename, err)
 	}
 
+	// attempt to add the same file information again, which should fail as a duplicate
+	_, err = store.AddFileInfo(user.ID, filename, lastMod, chunkCount, hashString)
+	if err == nil {
+		t.Fatal("Added a duplicate filename under the same user successuflly when a failure was expected.")
+	}
+
 	// get all the file info objects again
 	fileInfos, err = store.GetAllUserFileInfos(user.ID)
 	if err != nil {

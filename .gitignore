@@ -3,4 +3,6 @@
 *.swp
 .vscode
 cmd/freezer/freezer.rs*
+cmd/freezer/freezer
+cmd/freezer/freezer.exe
 cmd/freezer/*.db

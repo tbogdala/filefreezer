@@ -349,7 +349,8 @@ func (s *Storage) AddFileInfo(userID int, filename string, lastMod int64, chunkC
 		return nil, fmt.Errorf("failed to add a new file info in the database: %v", err)
 	}
 
-	// make sure one row was affected
+	// make sure one row was affected -- if the file was a duplicate, it violates the SQL command
+	// and while an erro wasn't returned above, no rows will be affected.
 	affected, err := res.RowsAffected()
 	if affected != 1 {
 		return nil, fmt.Errorf("failed to add a new file info in the database; no rows were affected")

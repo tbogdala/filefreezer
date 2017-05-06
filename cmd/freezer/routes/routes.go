@@ -6,6 +6,7 @@ package routes
 import (
 	"context"
 	"encoding/json"
+	"io/ioutil"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -23,6 +24,9 @@ func InitRoutes(state *models.State) *mux.Router {
 
 	// returns all files and their whole-file hash
 	r.Handle("/api/files", authenticateToken(state, handleGetAllFiles(state))).Methods("GET")
+
+	// handles registering a file to a user
+	r.Handle("/api/files", authenticateToken(state, handlePutFile(state))).Methods("POST")
 
 	// returns a file chunk list with hashes
 	// /api/file/{id}
@@ -76,6 +80,8 @@ type AllFilesGetResponse struct {
 	Files []filefreezer.FileInfo
 }
 
+// handleGetAllFiles returns a JSON object with all of the FileInfo objects in Storage
+// that are bound to the user id authorized in the context of the call.
 func handleGetAllFiles(state *models.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -95,6 +101,73 @@ func handleGetAllFiles(state *models.State) http.HandlerFunc {
 
 		writeJSONResponse(w, &AllFilesGetResponse{
 			Files: allFileInfos,
+		})
+	}
+}
+
+type FilePutResponse struct {
+	FileID int
+}
+
+type FilePutRequest struct {
+	FileName   string
+	LastMod    int64
+	ChunkCount int
+	FileHash   string
+}
+
+// handlePutFile registers a file for a given user.
+func handlePutFile(state *models.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// pull the user credentials
+		ctx := r.Context()
+		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
+		if userCredsI == nil {
+			http.Error(w, "Failed to get the user credentials", http.StatusUnauthorized)
+			return
+		}
+		userCreds := userCredsI.(*userCredentialsContext)
+
+		// deserialize the JSON object that should be in the request body
+		var req FilePutRequest
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read the request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		err = json.Unmarshal(body, &req)
+		if err != nil {
+			http.Error(w, "Failed to parse the request as a JSON object: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// sanity check some input
+		if len(req.FileName) < 1 {
+			http.Error(w, "fileName must be supplied in the request", http.StatusBadRequest)
+			return
+		}
+		if req.LastMod < 1 {
+			http.Error(w, "lastMod time must be supplied in the request", http.StatusBadRequest)
+			return
+		}
+		if req.ChunkCount < 1 {
+			http.Error(w, "chunkCount must be supplied in the request", http.StatusBadRequest)
+			return
+		}
+		if len(req.FileHash) < 1 {
+			http.Error(w, "fileHash must be supplied in the request", http.StatusBadRequest)
+			return
+		}
+
+		// register a new file in storage with the information
+		fi, err := state.Storage.AddFileInfo(userCreds.ID, req.FileName, req.LastMod, req.ChunkCount, req.FileHash)
+		if err != nil {
+			http.Error(w, "Failed to put a new file in storage for the user. "+err.Error(), http.StatusConflict)
+			return
+		}
+
+		writeJSONResponse(w, &FilePutResponse{
+			fi.FileID,
 		})
 	}
 }
