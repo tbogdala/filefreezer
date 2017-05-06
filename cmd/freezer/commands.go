@@ -15,7 +15,6 @@ import (
 
 	"github.com/tbogdala/filefreezer"
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
-	"github.com/tbogdala/filefreezer/cmd/freezer/routes"
 )
 
 // openStorage is the common function used to open the filefreezer Storage
@@ -135,7 +134,7 @@ func runServe(dbPath string, publicKeyPath string, privateKeyPath string) {
 	defer closeState(state)
 
 	// create the HTTP server
-	routes := routes.InitRoutes(state)
+	routes := InitRoutes(state)
 	httpServer := &http.Server{
 		Addr:    *argListenAddr,
 		Handler: routes,
