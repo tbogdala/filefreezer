@@ -48,11 +48,15 @@ TODO / Notes
   * make a filesystem interface dummy for testing
 
 * flag: file hashing algo
-* flag: max chunk size (default 4MB)
 * flag: encrypt files
 * flag: hash on start instead of just checking mod time
 
+* Storage needs a rename user function. This needs to be exposed
+  through a command in cmd/freezer and added to unit tests in both
+  places.
+
 * make sure it only adds files automatically, not symlinks
+* work on readability of error messages wrt bubbling up error objects
 
 
 Workflows

@@ -9,6 +9,8 @@ import (
 	"io/ioutil"
 	"net/http"
 
+	"strconv"
+
 	"github.com/gorilla/mux"
 	"github.com/tbogdala/filefreezer"
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
@@ -28,14 +30,31 @@ func InitRoutes(state *models.State) *mux.Router {
 	// handles registering a file to a user
 	r.Handle("/api/files", authenticateToken(state, handlePutFile(state))).Methods("POST")
 
-	// returns a file chunk list with hashes
-	// /api/file/{id}
+	// returns a file information respons with chunk list and hashes
+	r.Handle("/api/file/{fileid:[0-9]+}", authenticateToken(state, handleGetFile(state))).Methods("GET")
 
-	// returns/put a file chunk
-	// /api/file/{id}/{chunk num}
-	// setup the notepad handlers, hot CRUD style
+	// returns a file information respons with chunk list and hashes -- same as /api/file/{fileid} but for filenames
+	r.Handle("/api/file/name", authenticateToken(state, handleGetFileByName(state))).Methods("GET")
+
+	// deletes a file
+	r.Handle("/api/file/{fileid}", authenticateToken(state, handleDeleteFile(state))).Methods("DELETE")
+
+	// put a file chunk
+	r.Handle("/api/chunk/{fileid}/{chunknumber}/{chunkhash}", authenticateToken(state, handlePutFileChunk(state))).Methods("PUT")
+
+	// get a file chunk
+	r.Handle("/api/chunk/{fileid}/{chunknumber}", authenticateToken(state, handleGetFileChunk(state))).Methods("GET")
+
+	// get all known file chunks (except the chunks themselvesl)
+	r.Handle("/api/chunk/{fileid}", authenticateToken(state, handleGetFileChunks(state))).Methods("GET")
 
 	return r
+}
+
+// UserLoginResponse is the JSON serializable response given by the
+// /api/users/login POST handlder.
+type UserLoginResponse struct {
+	Token string
 }
 
 // handleUsersLogin handles the incoming POST /api/users/login
@@ -70,7 +89,7 @@ func handleUsersLogin(state *models.State) http.HandlerFunc {
 			return
 		}
 
-		writeJSONResponse(w, token)
+		writeJSONResponse(w, &UserLoginResponse{token})
 	}
 }
 
@@ -87,7 +106,7 @@ func handleGetAllFiles(state *models.State) http.HandlerFunc {
 		ctx := r.Context()
 		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
 		if userCredsI == nil {
-			http.Error(w, "Failed to get the user credentials", http.StatusUnauthorized)
+			http.Error(w, "Failed to get the user credentials.", http.StatusUnauthorized)
 			return
 		}
 		userCreds := userCredsI.(*userCredentialsContext)
@@ -95,7 +114,7 @@ func handleGetAllFiles(state *models.State) http.HandlerFunc {
 		// pull down all the fileinfo objects for a user
 		allFileInfos, err := state.Storage.GetAllUserFileInfos(userCreds.ID)
 		if err != nil {
-			http.Error(w, "Failed to get files for the user", http.StatusNotFound)
+			http.Error(w, "Failed to get files for the user.", http.StatusNotFound)
 			return
 		}
 
@@ -105,10 +124,265 @@ func handleGetAllFiles(state *models.State) http.HandlerFunc {
 	}
 }
 
+// FileGetResponse is the JSON serializable response given by the
+// /api/file/{id} GET handlder.
+type FileGetResponse struct {
+	filefreezer.FileInfo
+	MissingChunks []int
+}
+
+// FileGetByNameRequest is the JSON structure to be sent to the
+// /api/file/name GET handler.
+type FileGetByNameRequest struct {
+	FileName string
+}
+
+// handleGetFileByName returns a JSON object with all of the FileInfo data for the file in Storage
+// as well as a slice of missing chunks, if any.
+func handleGetFileByName(state *models.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
+		if userCredsI == nil {
+			http.Error(w, "Failed to get the user credentials.", http.StatusUnauthorized)
+			return
+		}
+		userCreds := userCredsI.(*userCredentialsContext)
+
+		// deserialize the JSON object that should be in the request body
+		var req FileGetByNameRequest
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read the request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		err = json.Unmarshal(body, &req)
+		if err != nil {
+			http.Error(w, "Failed to parse the request as a JSON object: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// pull down the fileinfo object for a file ID
+		fi, err := state.Storage.GetFileInfoByName(userCreds.ID, req.FileName)
+		if err != nil {
+			http.Error(w, "Failed to get file for the user.", http.StatusNotFound)
+			return
+		}
+
+		// get all of the missing chunks
+		missingChunks, err := state.Storage.GetMissingChunkNumbersForFile(userCreds.ID, fi.FileID)
+		if err != nil {
+			http.Error(w, "Failed to get the missing chunks for the file.", http.StatusBadRequest)
+			return
+		}
+
+		writeJSONResponse(w, &FileGetResponse{
+			FileInfo:      *fi,
+			MissingChunks: missingChunks,
+		})
+	}
+}
+
+// handleGetFile returns a JSON object with all of the FileInfo data for the file in Storage
+// as well as a slice of missing chunks, if any.
+func handleGetFile(state *models.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
+		if userCredsI == nil {
+			http.Error(w, "Failed to get the user credentials.", http.StatusUnauthorized)
+			return
+		}
+		userCreds := userCredsI.(*userCredentialsContext)
+
+		// pull the file id from the URI matched by the mux
+		vars := mux.Vars(r)
+		fileID, err := strconv.ParseInt(vars["fileid"], 10, 32)
+		if err != nil {
+			http.Error(w, "A valid integer was not used for the file id in the URI.", http.StatusBadRequest)
+			return
+		}
+
+		// pull down the fileinfo object for a file ID
+		fi, err := state.Storage.GetFileInfo(userCreds.ID, int(fileID))
+		if err != nil {
+			http.Error(w, "Failed to get file for the user.", http.StatusNotFound)
+			return
+		}
+
+		// get all of the missing chunks
+		missingChunks, err := state.Storage.GetMissingChunkNumbersForFile(userCreds.ID, fi.FileID)
+		if err != nil {
+			http.Error(w, "Failed to get the missing chunks for the file.", http.StatusBadRequest)
+			return
+		}
+
+		writeJSONResponse(w, &FileGetResponse{
+			FileInfo:      *fi,
+			MissingChunks: missingChunks,
+		})
+	}
+}
+
+// FileChunkPutResponse is the JSON serializable response given by the
+// /api/chunk/{id}/{chunknum} PUT handlder.
+type FileChunkPutResponse struct {
+	Status bool
+}
+
+// handleGetFile returns a JSON object with all of the FileInfo data for the file in Storage
+// as well as a slice of missing chunks, if any.
+func handlePutFileChunk(state *models.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
+		if userCredsI == nil {
+			http.Error(w, "Failed to get the user credentials.", http.StatusUnauthorized)
+			return
+		}
+		userCreds := userCredsI.(*userCredentialsContext)
+
+		// pull the file id from the URI matched by the mux
+		vars := mux.Vars(r)
+		fileID, err := strconv.ParseInt(vars["fileid"], 10, 32)
+		if err != nil {
+			http.Error(w, "A valid integer was not used for the file id in the URI.", http.StatusBadRequest)
+			return
+		}
+		chunkNumber, err := strconv.ParseInt(vars["chunknumber"], 10, 32)
+		if err != nil {
+			http.Error(w, "A valid integer was not used for the chunk number in the URI.", http.StatusBadRequest)
+			return
+		}
+		chunkHash, okay := vars["chunkhash"]
+		if !okay {
+			http.Error(w, "A valid string was not used for the chunk hash in the URI.", http.StatusBadRequest)
+			return
+		}
+
+		// get a byte limited reader, set to the maximum chunk size supported by Storage
+		bodyReader := http.MaxBytesReader(w, r.Body, state.Storage.ChunkSize)
+		defer bodyReader.Close()
+		chunk, err := ioutil.ReadAll(bodyReader)
+		if err != nil {
+			http.Error(w, "Failed to read the chunk: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// AddFileChunk does verify that the user ID owns the fild ID so we don't need
+		// to replicate that work here, just add the chunk.
+		fc, err := state.Storage.AddFileChunk(userCreds.ID, int(fileID), int(chunkNumber), chunkHash, chunk)
+		if err != nil || fc == nil {
+			http.Error(w, "Failed to add the chunk to storage: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		writeJSONResponse(w, &FileChunkPutResponse{
+			Status: true,
+		})
+	}
+}
+
+// FileChunksGetResponse is the JSON serializable response given by the
+// /api/chunk/{fileid}/ GET handlder.
+type FileChunksGetResponse struct {
+	Chunks []filefreezer.FileChunk
+}
+
+// handleGetFile returns a JSON object with all of the FileInfo data for the file in Storage
+// as well as a slice of missing chunks, if any.
+func handleGetFileChunks(state *models.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
+		if userCredsI == nil {
+			http.Error(w, "Failed to get the user credentials.", http.StatusUnauthorized)
+			return
+		}
+		userCreds := userCredsI.(*userCredentialsContext)
+
+		// pull the file id from the URI matched by the mux
+		vars := mux.Vars(r)
+		fileID, err := strconv.ParseInt(vars["fileid"], 10, 32)
+		if err != nil {
+			http.Error(w, "A valid integer was not used for the file id in the URI.", http.StatusBadRequest)
+			return
+		}
+
+		chunks, err := state.Storage.GetFileChunkInfos(userCreds.ID, int(fileID))
+		if err != nil {
+			http.Error(w, "Failed to get the chunk informations for the file id in the URI.", http.StatusBadRequest)
+			return
+		}
+
+		writeJSONResponse(w, &FileChunksGetResponse{
+			chunks,
+		})
+	}
+}
+
+// FileChunkGetResponse is the JSON serializable response given by the
+// /api/chunk/{fileid}/{chunknumber} GET handlder.
+type FileChunkGetResponse struct {
+	Chunk filefreezer.FileChunk
+}
+
+// handleGetFile returns a JSON object with all of the FileInfo data for the file in Storage
+// as well as a slice of missing chunks, if any.
+func handleGetFileChunk(state *models.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
+		if userCredsI == nil {
+			http.Error(w, "Failed to get the user credentials.", http.StatusUnauthorized)
+			return
+		}
+		userCreds := userCredsI.(*userCredentialsContext)
+
+		// pull the file id from the URI matched by the mux
+		vars := mux.Vars(r)
+		fileID, err := strconv.ParseInt(vars["fileid"], 10, 32)
+		if err != nil {
+			http.Error(w, "A valid integer was not used for the file id in the URI.", http.StatusBadRequest)
+			return
+		}
+		chunkNumber, err := strconv.ParseInt(vars["chunknumber"], 10, 32)
+		if err != nil {
+			http.Error(w, "A valid integer was not used for the chunk number in the URI.", http.StatusBadRequest)
+			return
+		}
+
+		// get the file info first to ensure ownership
+		fi, err := state.Storage.GetFileInfo(userCreds.ID, int(fileID))
+		if err != nil {
+			http.Error(w, "Failed to get the file information for the file id in the URI.", http.StatusBadRequest)
+			return
+		}
+		if fi.UserID != userCreds.ID {
+			http.Error(w, "Access denied.", http.StatusForbidden)
+			return
+		}
+
+		chunk, err := state.Storage.GetFileChunk(int(fileID), int(chunkNumber))
+		if err != nil {
+			http.Error(w, "Failed to get the chunk information for the file id and chunk number in the URI.", http.StatusBadRequest)
+			return
+		}
+
+		writeJSONResponse(w, &FileChunkGetResponse{
+			*chunk,
+		})
+	}
+}
+
+// FilePutResponse is the JSON serializable response given by the
+// /api/files PUT handlder.
 type FilePutResponse struct {
 	FileID int
 }
 
+// FilePutResponse is the JSON serializable request object sent to the
+// /api/files PUT handlder.
 type FilePutRequest struct {
 	FileName   string
 	LastMod    int64
@@ -169,6 +443,48 @@ func handlePutFile(state *models.State) http.HandlerFunc {
 		writeJSONResponse(w, &FilePutResponse{
 			fi.FileID,
 		})
+	}
+}
+
+// FileDeleteRequest is the JSON serializable request object sent to the
+// /api/files/{id} DELETE handlder.
+type FileDeleteRequest struct {
+	FileID int
+}
+
+// FileDeleteResponse is the JSON serializable response object from
+// /api/file/{id} DELETE handler.
+type FileDeleteResponse struct {
+	Success bool
+}
+
+func handleDeleteFile(state *models.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// pull the user credentials
+		ctx := r.Context()
+		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
+		if userCredsI == nil {
+			http.Error(w, "Failed to get the user credentials", http.StatusUnauthorized)
+			return
+		}
+		userCreds := userCredsI.(*userCredentialsContext)
+
+		// pull the file id from the URI matched by the mux
+		vars := mux.Vars(r)
+		fileID, err := strconv.ParseInt(vars["fileid"], 10, 32)
+		if err != nil {
+			http.Error(w, "A valid integer was not used for the file id in the URI.", http.StatusBadRequest)
+			return
+		}
+
+		// delete a file from storage with the information
+		err = state.Storage.RemoveFile(userCreds.ID, int(fileID))
+		if err != nil {
+			http.Error(w, "Failed to put a new file in storage for the user. "+err.Error(), http.StatusConflict)
+			return
+		}
+
+		writeJSONResponse(w, &FileDeleteResponse{true})
 	}
 }
 

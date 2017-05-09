@@ -5,11 +5,43 @@ package filefreezer
 
 import (
 	"crypto/rand"
+	"crypto/sha1"
 	"encoding/base64"
 	"fmt"
+	"io/ioutil"
+	"os"
 
 	"golang.org/x/crypto/bcrypt"
 )
+
+// CalcFileHashInfo takes the file name and calculates the number of chunks, last modified time
+// and hash string for the file. An error is returned on failure.
+func CalcFileHashInfo(maxChunkSize int64, filename string) (chunkCount int, lastMod int64, hashString string, e error) {
+	fileInfo, err := os.Stat(filename)
+	if err != nil {
+		e = fmt.Errorf("failed to stat the local file (%s) for the test", filename)
+		return
+	}
+
+	lastMod = fileInfo.ModTime().UTC().Unix()
+
+	// calculate the chunk count required for the file size
+	fileSize := fileInfo.Size()
+	chunkCount = int((fileSize - (fileSize % maxChunkSize) + maxChunkSize) / maxChunkSize)
+
+	// generate a hash for the test file
+	hasher := sha1.New()
+	fileBytes, err := ioutil.ReadFile(filename)
+	if err != nil {
+		e = fmt.Errorf("failed to create a file byte array for the hashing operation")
+		return
+	}
+	hasher.Write(fileBytes)
+	hash := hasher.Sum(nil)
+	hashString = base64.URLEncoding.EncodeToString(hash)
+
+	return
+}
 
 // GenSaltedHash takes the user password, generates a new random salt,
 // then generates a hash from the salted password combination.

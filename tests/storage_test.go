@@ -60,7 +60,10 @@ func TestQuotasAndPermissions(t *testing.T) {
 	}
 
 	filename := "../storage.go"
-	chunkCount, lastMod, hashString := calcFileHashInfo(t, store.ChunkSize, filename)
+	chunkCount, lastMod, hashString, err := filefreezer.CalcFileHashInfo(store.ChunkSize, filename)
+	if err != nil {
+		t.Fatalf("Failed to calculate the file hash data (%s): %v", filename, err)
+	}
 
 	// add the file information to the storage server
 	fi, err := store.AddFileInfo(user.ID, filename, lastMod, chunkCount, hashString)
@@ -190,23 +193,53 @@ func TestBasicDBCreation(t *testing.T) {
 
 	// pull up the local file information
 	filename := "../README.md"
-	chunkCount, lastMod, hashString := calcFileHashInfo(t, store.ChunkSize, filename)
+	chunkCount, lastMod, hashString, err := filefreezer.CalcFileHashInfo(store.ChunkSize, filename)
+	if err != nil {
+		t.Fatalf("Failed to calculate the file hash for %s: %v", filename, err)
+	}
 
 	// add the file information to the storage server
+	fi, err := store.AddFileInfo(user.ID, filename, lastMod, chunkCount, hashString)
+	if err != nil {
+		t.Fatalf("Failed to add a new file (%s): %v", filename, err)
+	}
+
+	// make sure we can get it by name
+	_, err = store.GetFileInfoByName(user.ID, filename)
+	if err != nil {
+		t.Fatalf("Failed to access a file by name: %v", err)
+	}
+
+	// now test removing it
+	err = store.RemoveFileInfo(fi.FileID)
+	if err != nil {
+		t.Fatalf("Failed to remove the file we just added.")
+	}
+	fileInfos, err := store.GetAllUserFileInfos(user.ID)
+	if err != nil {
+		t.Fatalf("Failed to get all of the user (id:%d) file infos in storage: %v", user.ID, err)
+	}
+	if len(fileInfos) != 0 {
+		t.Fatalf("Returned the wrong number of file infos (%d) for a user (id:%d).", len(fileInfos), user.ID)
+	}
+
+	// add the file information to the storage server again for the rest of the tests
 	_, err = store.AddFileInfo(user.ID, filename, lastMod, chunkCount, hashString)
 	if err != nil {
 		t.Fatalf("Failed to add a new file (%s): %v", filename, err)
 	}
 
 	// get all the file info objects
-	fileInfos, err := store.GetAllUserFileInfos(user.ID)
+	fileInfos, err = store.GetAllUserFileInfos(user.ID)
 	if err != nil {
 		t.Fatalf("Failed to get all of the user (id:%d) file infos in storage: %v", user.ID, err)
 	}
 	if len(fileInfos) != 1 {
 		t.Fatalf("Returned the wrong number of file infos (%d) for a user (id:%d).", len(fileInfos), user.ID)
 	}
-	first := fileInfos[0]
+
+	var first, second *filefreezer.FileInfo
+	first = &fileInfos[0]
 	if first.UserID != user.ID || first.FileID != 1 || first.FileName != filename ||
 		first.ChunkCount != chunkCount || first.LastMod != lastMod || first.FileHash != hashString {
 		t.Fatalf("The file information returned %s was incorrect: %v", filename, first)
@@ -234,7 +267,10 @@ func TestBasicDBCreation(t *testing.T) {
 
 	// add a second file
 	filename = "../storage.go"
-	chunkCount, lastMod, hashString = calcFileHashInfo(t, store.ChunkSize, filename)
+	chunkCount, lastMod, hashString, err = filefreezer.CalcFileHashInfo(store.ChunkSize, filename)
+	if err != nil {
+		t.Fatalf("Failed to calculate the file hash for %s: %v", filename, err)
+	}
 
 	// add the file information to the storage server
 	_, err = store.AddFileInfo(user.ID, filename, lastMod, chunkCount, hashString)
@@ -256,11 +292,11 @@ func TestBasicDBCreation(t *testing.T) {
 	if len(fileInfos) != 2 {
 		t.Fatalf("Returned the wrong number of file infos (%d) for a user (id:%d).", len(fileInfos), user.ID)
 	}
-	first = fileInfos[0]
-	second := fileInfos[1]
+	first = &fileInfos[0]
+	second = &fileInfos[1]
 	if second.FileName != filename {
-		first = fileInfos[1]
-		second = fileInfos[0]
+		first = &fileInfos[1]
+		second = &fileInfos[0]
 	}
 	if second.FileName != filename || second.FileID != 2 || second.UserID != user.ID ||
 		second.LastMod != lastMod || second.FileHash != hashString || second.ChunkCount != chunkCount {
@@ -277,12 +313,37 @@ func TestBasicDBCreation(t *testing.T) {
 
 	/////////////////////////////////////////////////////////////////////////////
 	// File Chunk Operations
-	err = addMissingFileChunks(store, &first)
+	err = addMissingFileChunks(store, first)
 	if err != nil {
 		t.Fatalf("Failed to add file chunks: %v", err)
 	}
 
-	err = addMissingFileChunks(store, &second)
+	// now test wiping out the file completely
+	err = store.RemoveFile(first.UserID, first.FileID)
+	if err != nil {
+		t.Fatalf("Failed to remove the file and all of the file chunks: %v", err)
+	}
+	// make sure we can't get the file chunk or the file info
+	_, err = store.GetFileChunk(first.FileID, 0)
+	if err == nil {
+		t.Fatalf("Got the first file chunk for the first file when failure was expected.")
+	}
+	_, err = store.GetFileInfo(first.UserID, first.FileID)
+	if err == nil {
+		t.Fatalf("Got the file info structure for the file that was just deleted when failure was expected.")
+	}
+
+	// add the first file back in so that the rests of the tests can continue
+	first, err = store.AddFileInfo(first.UserID, first.FileName, first.LastMod, first.ChunkCount, first.FileHash)
+	if err != nil {
+		t.Fatalf("Failed to add a the file again (%s): %v", first.FileName, err)
+	}
+	err = addMissingFileChunks(store, first)
+	if err != nil {
+		t.Fatalf("Failed to add first file chunks: %v", err)
+	}
+
+	err = addMissingFileChunks(store, second)
 	if err != nil {
 		t.Fatalf("Failed to add file chunks: %v", err)
 	}
@@ -294,6 +355,24 @@ func TestBasicDBCreation(t *testing.T) {
 	}
 	if len(miaList) != 0 {
 		t.Fatalf("Missing chunks were found for the file (%s) after uploading them.", first.FileName)
+	}
+
+	// see that we can get the file chunk infos for the file
+	firstFileChunks, err := store.GetFileChunkInfos(first.UserID, first.FileID)
+	if err != nil {
+		t.Fatalf("Could not get a list of file chunks for the file (%s): %v:", first.FileName, err)
+	}
+	if len(firstFileChunks) != first.ChunkCount {
+		t.Fatalf("Returned list of file chunks for a file didn't match the expected count. (got: %d, expected %d)",
+			len(firstFileChunks), first.ChunkCount)
+	}
+	// check to see if some of the chunk data is correct
+	chunk, err := store.GetFileChunk(first.FileID, 0)
+	if err != nil {
+		t.Fatalf("Failed to get the first file chunk for the first file: %v", err)
+	}
+	if chunk.ChunkHash != firstFileChunks[0].ChunkHash || firstFileChunks[0].ChunkNumber != 0 {
+		t.Fatalf("Chunk info doesn't match up between Storage.GetFileChunk() and Storage.GetFileChunkInfos()")
 	}
 
 	// test for failure when requesting missing chunks with an incorrect user id
@@ -345,7 +424,7 @@ func TestBasicDBCreation(t *testing.T) {
 	}
 
 	// add the missing chunks again and make sure no chunks are MIA
-	err = addMissingFileChunks(store, &second)
+	err = addMissingFileChunks(store, second)
 	if err != nil {
 		t.Fatalf("Failed to upload missing file chunks after one was deleted: %v", err)
 	}
@@ -477,31 +556,6 @@ func setupTestUser(store *filefreezer.Storage, username string, password string,
 		t.Fatalf("Failed to get the user info for %s (id:%d alloc:%d rev:%v): %v", username, user.ID,
 			userStats.Allocated, userStats.Revision, err)
 	}
-}
-
-func calcFileHashInfo(t *testing.T, maxChunkSize int64, filename string) (chunkCount int, lastMod int64, hashString string) {
-	fileInfo, err := os.Stat(filename)
-	if err != nil {
-		t.Fatalf("Failed to stat the local file (%s) for the test.", filename)
-	}
-
-	lastMod = fileInfo.ModTime().UTC().Unix()
-
-	// calculate the chunk count required for the file size
-	fileSize := fileInfo.Size()
-	chunkCount = int((fileSize - (fileSize % maxChunkSize) + maxChunkSize) / maxChunkSize)
-
-	// generate a hash for the test file
-	hasher := sha1.New()
-	fileBytes, err := ioutil.ReadFile(filename)
-	if err != nil {
-		t.Fatal("Failed to create a file byte array for the hashing operation.")
-	}
-	hasher.Write(fileBytes)
-	hash := hasher.Sum(nil)
-	hashString = base64.URLEncoding.EncodeToString(hash)
-
-	return
 }
 
 func addMissingFileChunks(store *filefreezer.Storage, fi *filefreezer.FileInfo) error {

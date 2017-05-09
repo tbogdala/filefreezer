@@ -54,16 +54,19 @@ const (
 	setUserQuota    = `UPDATE UserStats SET Quota = (?) WHERE UserID = ?;`
 
 	addFileInfo = `INSERT INTO FileInfo (UserID, FileName, LastMod, ChunkCount, FileHash) SELECT ?, ?, ?, ?, ?
-						  WHERE NOT EXISTS (SELECT 1 FROM FileInfo WHERE UserID = ? AND FileName = ?);`
-	getFileInfo      = `SELECT UserID, FileName, LastMod, ChunkCount, FileHash FROM FileInfo WHERE FileID = ?;`
-	getFileInfoOwner = `SELECT UserID  FROM FileInfo WHERE FileID = ?;`
-	getAllUserFiles  = `SELECT FileID, FileName, LastMod, ChunkCount, FileHash FROM FileInfo WHERE UserID = ?;`
+						WHERE NOT EXISTS (SELECT 1 FROM FileInfo WHERE UserID = ? AND FileName = ?);`
+	getFileInfo        = `SELECT UserID, FileName, LastMod, ChunkCount, FileHash FROM FileInfo WHERE FileID = ?;`
+	getFileInfoByName  = `SELECT FileID, LastMod, ChunkCount, FileHash FROM FileInfo WHERE FileName = ? AND UserID = ?;`
+	getFileInfoOwner   = `SELECT UserID  FROM FileInfo WHERE FileID = ?;`
+	getAllUserFiles    = `SELECT FileID, FileName, LastMod, ChunkCount, FileHash FROM FileInfo WHERE UserID = ?;`
+	removeFileInfoByID = `DELETE FROM FileInfo WHERE FileID = ?;`
 
 	getAllFileChunksByID = `SELECT ChunkNum, ChunkHash FROM FileChunks WHERE FileID = ?;`
 	addFileChunk         = `INSERT OR REPLACE INTO FileChunks (FileID, ChunkNum, ChunkHash, Chunk) 
 							  VALUES (?, ?, ?, ?);`
-	removeFileChunk = `DELETE FROM FileChunks WHERE FileID = ? AND ChunkNum = ?;`
-	getFileChunk    = `SELECT ChunkHash, Chunk FROM FileChunks WHERE FileID = ? AND ChunkNum = ?;`
+	removeAllFileChunks = `DELETE FROM FileChunks WHERE FileID = ?;`
+	removeFileChunk     = `DELETE FROM FileChunks WHERE FileID = ? AND ChunkNum = ?;`
+	getFileChunk        = `SELECT ChunkHash, Chunk FROM FileChunks WHERE FileID = ? AND ChunkNum = ?;`
 )
 
 // FileInfo contains the information stored about a given file for a particular user.
@@ -339,6 +342,58 @@ func (s *Storage) GetUserStats(userID int) (*UserStats, error) {
 	return stats, nil
 }
 
+// RemoveFile removes a file listing and all of the associated chunks in storage.
+// Returns an error on failure
+func (s *Storage) RemoveFile(userID, fileID int) error {
+	err := s.transact(func(tx *sql.Tx) error {
+		// check to make sure the user owns the file id
+		var owningUserID int
+		err := tx.QueryRow(getFileInfoOwner, fileID).Scan(&owningUserID)
+		if err != nil {
+			return fmt.Errorf("failed to get the owning user id for a given file: %v", err)
+		}
+		if owningUserID != userID {
+			return fmt.Errorf("user does not own the file id supplied")
+		}
+
+		// remove the file info
+		_, err = tx.Exec(removeFileInfoByID, fileID)
+		if err != nil {
+			return fmt.Errorf("failed to remove a file info in the database: %v", err)
+		}
+
+		// remove all of the file chunks
+		_, err = tx.Exec(removeAllFileChunks, fileID)
+		if err != nil {
+			return fmt.Errorf("failed to delete the file chunks associated with the file: %v", err)
+		}
+
+		// if no rows were affected, that just means there were no chunks that
+		// needed to be deleted, so no need to check the result.
+
+		return nil
+	})
+
+	return err
+}
+
+// RemoveFileInfo removes a file listing in storage, returning an error on failure.
+func (s *Storage) RemoveFileInfo(fileID int) error {
+	res, err := s.db.Exec(removeFileInfoByID, fileID)
+	if err != nil {
+		return fmt.Errorf("failed to remove a file info in the database: %v", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if affected != 1 {
+		return fmt.Errorf("failed to remove a file info in the database; %d row(s) were affected", affected)
+	} else if err != nil {
+		return fmt.Errorf("failed to add a new file info in the database: %v", err)
+	}
+
+	return nil
+}
+
 // AddFileInfo registers a new file for a given user which is identified by the filename string.
 // lastmod (time in seconds since 1/1/1970) and the filehash string are provided as well. The
 // chunkCount parameter should be the number of chunks required for the size of the file. If the
@@ -353,7 +408,7 @@ func (s *Storage) AddFileInfo(userID int, filename string, lastMod int64, chunkC
 	// and while an erro wasn't returned above, no rows will be affected.
 	affected, err := res.RowsAffected()
 	if affected != 1 {
-		return nil, fmt.Errorf("failed to add a new file info in the database; no rows were affected")
+		return nil, fmt.Errorf("failed to add a new file info in the database; no rows were affected (possible duplicate file)")
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to add a new file info in the database: %v", err)
 	}
@@ -430,6 +485,71 @@ func (s *Storage) GetFileInfo(userID int, fileID int) (*FileInfo, error) {
 		return nil, err
 	}
 	return fi, nil
+}
+
+// GetFileInfoByName returns a UserFileInfo object that describes the file identified
+// by the userID and filename parameters. If this query was unsuccessful an error is returned.
+func (s *Storage) GetFileInfoByName(userID int, filename string) (*FileInfo, error) {
+	fi := new(FileInfo)
+	err := s.db.QueryRow(getFileInfoByName, filename, userID).Scan(&fi.FileID, &fi.LastMod, &fi.ChunkCount, &fi.FileHash)
+	if err != nil {
+		return nil, err
+	}
+	fi.UserID = userID
+	fi.FileName = filename
+	return fi, nil
+}
+
+// GetFileChunkInfos returns a slice of FileChunks containing all of the chunk
+// information except for the chunk bytes themselves.
+func (s *Storage) GetFileChunkInfos(userID int, fileID int) ([]FileChunk, error) {
+	var fi FileInfo
+	var chunk FileChunk
+	knownChunks := []FileChunk{}
+	err := s.transact(func(tx *sql.Tx) error {
+		// check to make sure the user owns the file id
+		var owningUserID int
+		err := tx.QueryRow(getFileInfoOwner, fileID).Scan(&owningUserID)
+		if err != nil {
+			return fmt.Errorf("failed to get the owning user id for a given file: %v", err)
+		}
+		if owningUserID != userID {
+			return fmt.Errorf("user does not own the file id supplied")
+		}
+
+		// get the file information
+		err = tx.QueryRow(getFileInfo, fileID).Scan(&fi.UserID, &fi.FileName, &fi.LastMod, &fi.ChunkCount, &fi.FileHash)
+		if err != nil {
+			return err
+		}
+		fi.FileID = fileID
+
+		// get all of the file chunks for the file
+		rows, err := tx.Query(getAllFileChunksByID, fileID)
+		if err != nil {
+			return fmt.Errorf("failed to get all of the file chunks from the database for fileID %d: %v", fileID, err)
+		}
+		defer rows.Close()
+
+		chunk.FileID = fileID
+		for rows.Next() {
+			err := rows.Scan(&chunk.ChunkNumber, &chunk.ChunkHash)
+			if err != nil {
+				return fmt.Errorf("failed to scan the next row while processing files chunks for fileID %d: %v", fileID, err)
+			}
+			knownChunks = append(knownChunks, chunk)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("failed to scan all of the search results for a username: %v", err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return knownChunks, nil
 }
 
 // GetMissingChunkNumbersForFile will return a slice of chunk numbers that have
