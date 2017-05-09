@@ -37,7 +37,8 @@ const (
 	);`
 
 	createFileChunksTable = `CREATE TABLE FileChunks (
-		FileID 		INTEGER PRIMARY KEY	NOT NULL,
+		ChunkID     INTEGER PRIMARY KEY	NOT NULL,
+		FileID 		INTEGER             NOT NULL,
 		ChunkNum	INTEGER 			NOT NULL,
 		ChunkHash	TEXT				NOT NULL,
 		Chunk		BLOB				NOT NULL
@@ -503,7 +504,6 @@ func (s *Storage) GetFileInfoByName(userID int, filename string) (*FileInfo, err
 // GetFileChunkInfos returns a slice of FileChunks containing all of the chunk
 // information except for the chunk bytes themselves.
 func (s *Storage) GetFileChunkInfos(userID int, fileID int) ([]FileChunk, error) {
-	var fi FileInfo
 	var chunk FileChunk
 	knownChunks := []FileChunk{}
 	err := s.transact(func(tx *sql.Tx) error {
@@ -516,13 +516,6 @@ func (s *Storage) GetFileChunkInfos(userID int, fileID int) ([]FileChunk, error)
 		if owningUserID != userID {
 			return fmt.Errorf("user does not own the file id supplied")
 		}
-
-		// get the file information
-		err = tx.QueryRow(getFileInfo, fileID).Scan(&fi.UserID, &fi.FileName, &fi.LastMod, &fi.ChunkCount, &fi.FileHash)
-		if err != nil {
-			return err
-		}
-		fi.FileID = fileID
 
 		// get all of the file chunks for the file
 		rows, err := tx.Query(getAllFileChunksByID, fileID)

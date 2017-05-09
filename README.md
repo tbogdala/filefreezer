@@ -50,6 +50,7 @@ TODO / Notes
 * flag: file hashing algo
 * flag: encrypt files
 * flag: hash on start instead of just checking mod time
+* flag: verbosity level
 
 * Storage needs a rename user function. This needs to be exposed
   through a command in cmd/freezer and added to unit tests in both
@@ -57,6 +58,9 @@ TODO / Notes
 
 * make sure it only adds files automatically, not symlinks
 * work on readability of error messages wrt bubbling up error objects
+* Server could return capabilities in json response to login that
+  could have things like MaxChunkSize for the client to use.
+
 
 
 Workflows

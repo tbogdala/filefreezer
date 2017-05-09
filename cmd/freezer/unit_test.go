@@ -4,9 +4,15 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"testing"
+	"time"
+
+	"io/ioutil"
 
 	"github.com/tbogdala/filefreezer"
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
@@ -15,20 +21,44 @@ import (
 const (
 	testServerAddr = ":8080"
 	testHost       = "http://127.0.0.1:8080"
+	testFilename1  = "unit_test_1.dat"
+	testFilename2  = "unit_test_2.dat"
 )
 
 var (
 	state *models.State
 )
 
+// TODO: make a test upload a file exactly 2xChunkSize and then sync it
+
+func genRandomBytes(length int) []byte {
+	b := make([]byte, length)
+	for i := 0; i < length; i++ {
+		b[i] = byte(rand.Uint32() >> 24)
+		if b[i] == 0 {
+			b[i] = 1
+		}
+	}
+	return b
+}
+
 func TestMain(m *testing.M) {
 	// instead of using command line flags for the unit test, we'll just
 	// override the flag values right here
 	*flagDatabasePath = "file::memory:?mode=memory&cache=shared"
+	//*flagDatabasePath = "file:unit_test.db"
 	*flagPublicKeyPath = "freezer.rsa.pub"
 	*flagPrivateKeyPath = "freezer.rsa"
 	*flagChunkSize = 1024 * 1024 * 4
+	*flagExtraStrict = true
 	*argListenAddr = testServerAddr
+
+	// write out some random files
+	rand.Seed(time.Now().Unix())
+	rando1 := genRandomBytes(int(*flagChunkSize) * 3)
+	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
+	rando2 := genRandomBytes(int(*flagChunkSize)*2 + 42)
+	ioutil.WriteFile(testFilename2, rando2, os.ModePerm)
 
 	// run a new state in a server
 	var err error
@@ -72,7 +102,7 @@ func TestEverything(t *testing.T) {
 	t.Logf("Got all of the file names (%d) ...", len(allFiles))
 
 	// test adding a file
-	filename := "main.go"
+	filename := testFilename1
 	chunkCount, lastMod, hashString, err := filefreezer.CalcFileHashInfo(state.Storage.ChunkSize, filename)
 	if err != nil {
 		t.Fatalf("Failed to calculate the file hash for %s: %v", filename, err)
@@ -84,4 +114,43 @@ func TestEverything(t *testing.T) {
 		t.Fatalf("Failed to at the file %s: %v", filename, err)
 	}
 	t.Logf("Added file %s (id: %d) ...", filename, fileID)
+
+	// now that the file is registered, sync the data
+	syncStatus, _, err := runSyncFile(testHost, token, filename)
+	if err != nil {
+		t.Fatalf("Failed to sync the file %s to the server: %v", filename, err)
+	}
+	if syncStatus != syncStatusSame {
+		t.Fatalf("Initial sync after add should be identical for file %s", filename)
+	}
+	t.Logf("Synced the file %s ...", filename)
+
+	// now we get a chunk list for the file
+	var remoteChunks FileChunksGetResponse
+	target := fmt.Sprintf("%s/api/chunk/%d", testHost, fileID)
+	body, err := runAuthRequest(target, "GET", token, nil)
+	err = json.Unmarshal(body, &remoteChunks)
+	if err != nil {
+		t.Fatalf("Failed to get the file chunk list for the file name given (%s): %v", filename, err)
+	}
+	if len(remoteChunks.Chunks) != chunkCount {
+		t.Fatalf("The synced file %s doesn't have the correct number of chunks on the server (got:%d expected:%d). %v",
+			filename, len(remoteChunks.Chunks), chunkCount, remoteChunks)
+	}
+
+	// sleep a second then regenerate the file
+	time.Sleep(time.Second)
+	rando1 := genRandomBytes(int(*flagChunkSize * 3))
+	ioutil.WriteFile(filename, rando1, os.ModePerm)
+
+	// now that the file is registered, sync the data
+	syncStatus, _, err = runSyncFile(testHost, token, filename)
+	if err != nil {
+		t.Fatalf("Failed to sync the file %s to the server: %v", filename, err)
+	}
+	if syncStatus != syncStatusLocalNewer {
+		t.Fatalf("Sync after regeneration should be newer for file %s (%d)", filename, syncStatus)
+	}
+	t.Logf("Synced the file %s again ...", filename)
+
 }

@@ -30,10 +30,10 @@ func InitRoutes(state *models.State) *mux.Router {
 	// handles registering a file to a user
 	r.Handle("/api/files", authenticateToken(state, handlePutFile(state))).Methods("POST")
 
-	// returns a file information respons with chunk list and hashes
+	// returns a file information response with missing chunk list
 	r.Handle("/api/file/{fileid:[0-9]+}", authenticateToken(state, handleGetFile(state))).Methods("GET")
 
-	// returns a file information respons with chunk list and hashes -- same as /api/file/{fileid} but for filenames
+	// returns a file information response with missing chunk list -- same as /api/file/{fileid} but for filenames
 	r.Handle("/api/file/name", authenticateToken(state, handleGetFileByName(state))).Methods("GET")
 
 	// deletes a file
@@ -314,7 +314,6 @@ func handleGetFileChunks(state *models.State) http.HandlerFunc {
 			http.Error(w, "Failed to get the chunk informations for the file id in the URI.", http.StatusBadRequest)
 			return
 		}
-
 		writeJSONResponse(w, &FileChunksGetResponse{
 			chunks,
 		})

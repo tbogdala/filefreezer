@@ -27,7 +27,10 @@ func CalcFileHashInfo(maxChunkSize int64, filename string) (chunkCount int, last
 
 	// calculate the chunk count required for the file size
 	fileSize := fileInfo.Size()
-	chunkCount = int((fileSize - (fileSize % maxChunkSize) + maxChunkSize) / maxChunkSize)
+	chunkCount = int(fileSize / maxChunkSize)
+	if fileSize%maxChunkSize != 0 {
+		chunkCount++
+	}
 
 	// generate a hash for the test file
 	hasher := sha1.New()

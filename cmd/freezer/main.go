@@ -22,6 +22,7 @@ var (
 	flagPublicKeyPath  = appFlags.Flag("pub", "The file path to the public key.").Default("freezer.rsa.pub").String()
 	flagPrivateKeyPath = appFlags.Flag("priv", "The file path to the private key.").Default("freezer.rsa").String()
 	flagChunkSize      = appFlags.Flag("cs", "The number of bytes contained in one chunk.").Default("4194304").Int64() // 4 MB
+	flagExtraStrict    = appFlags.Flag("xs", "File checking should be extra strict on file sync comparisons.").Default("true").Bool()
 
 	cmdServe      = appFlags.Command("serve", "Adds a new user to the storage.")
 	argListenAddr = cmdServe.Arg("http", "The net address to listen to").Default(":8080").String()
