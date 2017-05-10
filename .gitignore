@@ -4,6 +4,8 @@
 .vscode
 cmd/freezer/freezer.rs*
 cmd/freezer/freezer
+cmd/freezer/freezer.key
+cmd/freezer/freezer.crt
 cmd/freezer/freezer.exe
 cmd/freezer/*.db
 cmd/freezer/testdata

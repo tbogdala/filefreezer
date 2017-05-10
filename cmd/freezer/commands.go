@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha1"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"log"
@@ -17,6 +19,8 @@ import (
 	"os/signal"
 	"strings"
 	"time"
+
+	"golang.org/x/net/http2"
 
 	"encoding/base64"
 	"encoding/json"
@@ -84,9 +88,15 @@ func runModUser(store *filefreezer.Storage, username string, password string, qu
 // runUserAuthenticate will use a HTTP call to authenticate the user
 // and return the JWT token string.
 func runUserAuthenticate(hostURI, username, password string) (string, error) {
+	// get the http client to use for the connection
+	client, err := getHTTPClient()
+	if err != nil {
+		return "", err
+	}
+
 	// Build and perform the request
 	target := fmt.Sprintf("%s/api/users/login", hostURI)
-	resp, err := http.PostForm(target, url.Values{
+	resp, err := client.PostForm(target, url.Values{
 		"user":     {username},
 		"password": {password},
 	})
@@ -117,9 +127,49 @@ func runUserAuthenticate(hostURI, username, password string) (string, error) {
 	return userLogin.Token, nil
 }
 
+// getHttpClient returns a new http Client object set to work with TLS if keys are provided
+// on the command line or plain http otherwise.
+func getHTTPClient() (*http.Client, error) {
+	var client *http.Client
+	if *flagTLSCrt != "" && *flagTLSKey != "" {
+		cert, err := tls.LoadX509KeyPair(*flagTLSCrt, *flagTLSKey)
+		if err != nil {
+			return nil, fmt.Errorf("unable to load cert: %v", err)
+		}
+
+		xpool := x509.NewCertPool()
+		tlsConfig := &tls.Config{
+			RootCAs:      xpool,
+			Certificates: []tls.Certificate{cert},
+		}
+		//tlsConfig.BuildNameToCertificate()
+		transport := &http2.Transport{TLSClientConfig: tlsConfig}
+		client = &http.Client{Transport: transport}
+
+		// Load our trusted certificate path
+		certPath := *flagTLSCrt
+		pemData, err := ioutil.ReadFile(certPath)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to load the certificate file %s: %v", certPath, err)
+		}
+		ok := tlsConfig.RootCAs.AppendCertsFromPEM(pemData)
+		if !ok {
+			return nil, fmt.Errorf("couldn't load PEM data for HTTPS client")
+		}
+	} else {
+		client = &http.Client{}
+	}
+
+	return client, nil
+}
+
 // buildAuthRequest builds a http client and request with the authorization header and token attached.
-func buildAuthRequest(target string, method string, token string, bodyBytes []byte) (*http.Client, *http.Request) {
-	client := &http.Client{}
+func buildAuthRequest(target string, method string, token string, bodyBytes []byte) (*http.Client, *http.Request, error) {
+	// Load client cert
+	client, err := getHTTPClient()
+	if err != nil {
+		return nil, nil, err
+	}
 
 	var req *http.Request
 	if bodyBytes != nil {
@@ -128,7 +178,7 @@ func buildAuthRequest(target string, method string, token string, bodyBytes []by
 		req, _ = http.NewRequest(method, target, nil)
 	}
 	req.Header.Add("Authorization", "Bearer "+token)
-	return client, req
+	return client, req, nil
 }
 
 // runAuthRequest will build the http client and request then get the response and read
@@ -149,7 +199,10 @@ func runAuthRequest(target string, method string, token string, reqBody interfac
 		}
 	}
 
-	client, req := buildAuthRequest(target, method, token, reqBytes)
+	client, req, err := buildAuthRequest(target, method, token, reqBytes)
+	if err != nil {
+		return nil, err
+	}
 
 	// set the header if a JSON object is being sent
 	if reqBytes != nil && !reqBodyIsByteSlice {
@@ -293,8 +346,8 @@ func runSyncFile(hostURI string, token string, filename string) (status int, cha
 	// at this point we have a file difference. we'll use the local file as the source of truth
 	// if it's lastMod is newer than the remote file.
 	if localLastMod > remote.LastMod {
-		e = syncUploadNewer(hostURI, token, remote.FileID, filename, localLastMod, localChunkCount, localHash)
-		return syncStatusLocalNewer, 0, e
+		ulCount, e := syncUploadNewer(hostURI, token, remote.FileID, filename, localLastMod, localChunkCount, localHash)
+		return syncStatusLocalNewer, ulCount, e
 	}
 
 	if localLastMod < remote.LastMod {
@@ -304,8 +357,8 @@ func runSyncFile(hostURI string, token string, filename string) (status int, cha
 
 	// we have the same lastmod times at this point. check for missing chunks to send
 	if len(remote.MissingChunks) > 0 {
-		e = syncUploadMissing(hostURI, token, remote.FileID, filename, localChunkCount)
-		return syncStatusMissing, 0, e
+		ulCount, e := syncUploadMissing(hostURI, token, remote.FileID, filename, localChunkCount)
+		return syncStatusMissing, ulCount, e
 	}
 
 	// we checked to make sure it was the same above, but we found it different -- however, no steps to
@@ -313,7 +366,7 @@ func runSyncFile(hostURI string, token string, filename string) (status int, cha
 	return 0, 0, fmt.Errorf("found differences between local and remote versions of %s but this was not reconcilled", filename)
 }
 
-func syncUploadMissing(hostURI string, token string, remoteID int, filename string, localChunkCount int) error {
+func syncUploadMissing(hostURI string, token string, remoteID int, filename string, localChunkCount int) (uploadCount int, e error) {
 	// upload each chunk
 	err := forEachChunk(int(*flagChunkSize), filename, localChunkCount, func(i int, b []byte) (bool, error) {
 		// hash the chunk
@@ -335,23 +388,24 @@ func syncUploadMissing(hostURI string, token string, remoteID int, filename stri
 		}
 
 		log.Printf("%s +++ %d / %d", filename, i+1, localChunkCount)
+		uploadCount++
 
 		return true, nil
 	})
 	if err != nil {
-		return fmt.Errorf("Failed to upload the local file chunk for %s: %v", filename, err)
+		return uploadCount, fmt.Errorf("Failed to upload the local file chunk for %s: %v", filename, err)
 	}
 
-	return nil
+	return uploadCount, nil
 }
 
 func syncUploadNewer(hostURI string, token string, remoteFileID int,
-	filename string, localLastMod int64, localChunkCount int, localHash string) error {
+	filename string, localLastMod int64, localChunkCount int, localHash string) (uploadCount int, e error) {
 	// delete the remote file
 	target := fmt.Sprintf("%s/api/file/%d", hostURI, remoteFileID)
 	body, err := runAuthRequest(target, "DELETE", token, nil)
 	if err != nil {
-		return fmt.Errorf("Failed to remove the file %d: %v", remoteFileID, err)
+		return 0, fmt.Errorf("Failed to remove the file %d: %v", remoteFileID, err)
 	}
 	log.Printf("%s XXX deleted remote", filename)
 
@@ -364,13 +418,13 @@ func syncUploadNewer(hostURI string, token string, remoteFileID int,
 	target = fmt.Sprintf("%s/api/files", hostURI)
 	body, err = runAuthRequest(target, "POST", token, putReq)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	var putResp models.FilePutResponse
 	err = json.Unmarshal(body, &putResp)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	remoteID := putResp.FileID
 
@@ -395,15 +449,16 @@ func syncUploadNewer(hostURI string, token string, remoteFileID int,
 		}
 
 		log.Printf("%s +++ %d / %d", filename, i+1, localChunkCount)
+		uploadCount++
 
 		return true, nil
 	})
 	if err != nil {
-		return fmt.Errorf("Failed to upload the local file chunk for %s: %v", filename, err)
+		return uploadCount, fmt.Errorf("Failed to upload the local file chunk for %s: %v", filename, err)
 	}
 
 	log.Printf("%s ==> uploaded", filename)
-	return nil
+	return uploadCount, nil
 }
 
 func syncDownload(filename string) error {
@@ -515,23 +570,23 @@ func runServe(state *models.State, readyCh chan bool) {
 		}
 	}()
 
-	addr := httpServer.Addr
-	if addr == "" {
-		addr = ":http"
-	}
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		log.Printf("Failed to create the server listening socket: %v", err)
-		return
-	}
-
 	// now that the listener is up, send out the ready signal
-	log.Printf("Starting http server on %s ...", addr)
 	if readyCh != nil {
 		readyCh <- true
 	}
 
-	err = httpServer.Serve(tcpKeepAliveListener{ln.(*net.TCPListener)})
+	var err error
+	if len(*flagTLSCrt) < 1 || len(*flagTLSKey) < 1 {
+		log.Printf("Starting http server on %s ...", *argListenAddr)
+		err = httpServer.ListenAndServe()
+	} else {
+		log.Printf("Starting https server on %s ...", *argListenAddr)
+		err = http2.ConfigureServer(httpServer, nil)
+		if err != nil {
+			log.Printf("Unable to enable HTTP/2 for the server: %v", err)
+		}
+		err = httpServer.ListenAndServeTLS(*flagTLSCrt, *flagTLSKey)
+	}
 	if err != nil && err != http.ErrServerClosed {
 		log.Printf("There was an error while running the HTTP server: %v", err)
 	}

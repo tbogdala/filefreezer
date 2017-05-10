@@ -20,7 +20,7 @@ import (
 
 const (
 	testServerAddr = ":8080"
-	testHost       = "http://127.0.0.1:8080"
+	testHost       = "https://127.0.0.1:8080"
 	testDataDir    = "testdata"
 	testFilename1  = "testdata/unit_test_1.dat"
 	testFilename2  = "testdata/unit_test_2.dat"
@@ -50,6 +50,8 @@ func TestMain(m *testing.M) {
 	//*flagDatabasePath = "file:unit_test.db"
 	*flagPublicKeyPath = "freezer.rsa.pub"
 	*flagPrivateKeyPath = "freezer.rsa"
+	*flagTLSKey = "freezer.key"
+	*flagTLSCrt = "freezer.crt"
 	*flagChunkSize = 1024 * 1024 * 4
 	*flagExtraStrict = true
 	*argListenAddr = testServerAddr
@@ -120,12 +122,15 @@ func TestEverything(t *testing.T) {
 	t.Logf("Added file %s (id: %d) ...", filename, fileID)
 
 	// now that the file is registered, sync the data
-	syncStatus, _, err := runSyncFile(testHost, token, filename)
+	syncStatus, ulCount, err := runSyncFile(testHost, token, filename)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s to the server: %v", filename, err)
 	}
 	if syncStatus != syncStatusSame {
 		t.Fatalf("Initial sync after add should be identical for file %s", filename)
+	}
+	if ulCount != 0 {
+		t.Fatalf("The first sync of the first test file should be identical, but sync said %d chunks were uploaded.", ulCount)
 	}
 	t.Logf("Synced the file %s ...", filename)
 
@@ -148,13 +153,17 @@ func TestEverything(t *testing.T) {
 	ioutil.WriteFile(filename, rando1, os.ModePerm)
 
 	// now that the file is registered, sync the data
-	syncStatus, _, err = runSyncFile(testHost, token, filename)
+	syncStatus, ulCount, err = runSyncFile(testHost, token, filename)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s to the server: %v", filename, err)
 	}
 	if syncStatus != syncStatusLocalNewer {
 		t.Fatalf("Sync after regeneration should be newer for file %s (%d)", filename, syncStatus)
 	}
+	if ulCount != 3 {
+		t.Fatalf("The first sync of the changed test file should have uploaded 3 chunks but it uploaded %d.", ulCount)
+	}
+
 	t.Logf("Synced the file %s again ...", filename)
 
 }

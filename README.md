@@ -21,6 +21,7 @@ The following dependencies will need to be installed:
 go get github.com/dgrijalva/jwt-go
 go get github.com/gorilla/mux
 go get gopkg.in/alecthomas/kingpin.v2
+go get golang.org/x/net/http2
 
 ```
 
@@ -31,6 +32,16 @@ cd cmd/freezer
 ssh-keygen -t rsa -b 4096 -f freezer.rsa
 openssl rsa -in freezer.rsa -pubout -outform PEM -out freezer.rsa.pub
 ```
+
+The self-signed TLS keys for serving HTTP/2 over HTTPS can be created with openssl:
+
+```bash
+cd cmd/freezer/certgen
+go run generate_cert.go -ca -ecdsa-curve P384 -host 127.0.0.1
+```
+
+In production, you'll want to use your own valid certificate public and private keys.
+
 
 TODO / Notes
 ------------

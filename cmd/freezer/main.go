@@ -16,11 +16,14 @@ import (
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
 
+// User kingpin to define a set of commands and flags for the application.
 var (
 	appFlags           = kingpin.New("freezer", "A web application server for FileFreezer.")
 	flagDatabasePath   = appFlags.Flag("db", "The database path.").Default("file:freezer.db").String()
 	flagPublicKeyPath  = appFlags.Flag("pub", "The file path to the public key.").Default("freezer.rsa.pub").String()
 	flagPrivateKeyPath = appFlags.Flag("priv", "The file path to the private key.").Default("freezer.rsa").String()
+	flagTLSKey         = appFlags.Flag("tlskey", "The HTTPS TLS private key file.").Default("freezer.key").String()
+	flagTLSCrt         = appFlags.Flag("tlscert", "The HTTPS TLS public crt file.").Default("freezer.crt").String()
 	flagChunkSize      = appFlags.Flag("cs", "The number of bytes contained in one chunk.").Default("4194304").Int64() // 4 MB
 	flagExtraStrict    = appFlags.Flag("xs", "File checking should be extra strict on file sync comparisons.").Default("true").Bool()
 
