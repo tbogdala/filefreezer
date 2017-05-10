@@ -182,7 +182,7 @@ func runGetAllFileHashes(hostURI, token string) ([]filefreezer.FileInfo, error) 
 		return nil, err
 	}
 
-	var allFiles AllFilesGetResponse
+	var allFiles models.AllFilesGetResponse
 	err = json.Unmarshal(body, &allFiles)
 	if err != nil {
 		return nil, fmt.Errorf("Poorly formatted response to %s: %v", target, err)
@@ -192,7 +192,7 @@ func runGetAllFileHashes(hostURI, token string) ([]filefreezer.FileInfo, error) 
 }
 
 func runAddFile(hostURI string, token string, fileName string, lastMod int64, chunkCount int, fileHash string) (int, error) {
-	var putReq FilePutRequest
+	var putReq models.FilePutRequest
 	putReq.FileName = fileName
 	putReq.LastMod = lastMod
 	putReq.ChunkCount = chunkCount
@@ -206,7 +206,7 @@ func runAddFile(hostURI string, token string, fileName string, lastMod int64, ch
 
 	// if the POST fails or the response is bad, then the file wasn't registered
 	// with the freezer, so there's nothing to rollback -- just return.
-	var putResp FilePutResponse
+	var putResp models.FilePutResponse
 	err = json.Unmarshal(body, &putResp)
 	if err != nil {
 		return 0, err
@@ -226,8 +226,8 @@ const (
 )
 
 func runSyncFile(hostURI string, token string, filename string) (status int, changeCount int, e error) {
-	var getReq FileGetByNameRequest
-	var remote FileGetResponse
+	var getReq models.FileGetByNameRequest
+	var remote models.FileGetResponse
 
 	// get the file information for the filename, which provides
 	// all of the information necessary to determine what to sync.
@@ -251,7 +251,7 @@ func runSyncFile(hostURI string, token string, filename string) (status int, cha
 		different := false
 		if *flagExtraStrict {
 			// now we get a chunk list for the file
-			var remoteChunks FileChunksGetResponse
+			var remoteChunks models.FileChunksGetResponse
 			target := fmt.Sprintf("%s/api/chunk/%d", hostURI, remote.FileID)
 			body, err := runAuthRequest(target, "GET", token, nil)
 			err = json.Unmarshal(body, &remoteChunks)
@@ -328,7 +328,7 @@ func syncUploadMissing(hostURI string, token string, remoteID int, filename stri
 			return false, err
 		}
 
-		var resp FileChunkPutResponse
+		var resp models.FileChunkPutResponse
 		err = json.Unmarshal(body, &resp)
 		if err != nil || resp.Status == false {
 			return false, fmt.Errorf("Failed to upload the chunk to the server: %v", err)
@@ -356,7 +356,7 @@ func syncUploadNewer(hostURI string, token string, remoteFileID int,
 	log.Printf("%s XXX deleted remote", filename)
 
 	// establish a new file on the remote freezer
-	var putReq FilePutRequest
+	var putReq models.FilePutRequest
 	putReq.FileName = filename
 	putReq.LastMod = localLastMod
 	putReq.ChunkCount = localChunkCount
@@ -367,7 +367,7 @@ func syncUploadNewer(hostURI string, token string, remoteFileID int,
 		return err
 	}
 
-	var putResp FilePutResponse
+	var putResp models.FilePutResponse
 	err = json.Unmarshal(body, &putResp)
 	if err != nil {
 		return err
@@ -388,7 +388,7 @@ func syncUploadNewer(hostURI string, token string, remoteFileID int,
 			return false, err
 		}
 
-		var resp FileChunkPutResponse
+		var resp models.FileChunkPutResponse
 		err = json.Unmarshal(body, &resp)
 		if err != nil || resp.Status == false {
 			return false, fmt.Errorf("Failed to upload the chunk to the server: %v", err)
@@ -450,13 +450,13 @@ func forEachChunk(chunkSize int, filename string, localChunkCount int, eachFunc 
 }
 
 func runRmFile(hostURI string, token string, filename string) error {
-	var getReq FileGetByNameRequest
+	var getReq models.FileGetByNameRequest
 	getReq.FileName = filename
 
 	// get the file id for the filename provided
 	target := fmt.Sprintf("%s/api/file/name", hostURI)
 	body, err := runAuthRequest(target, "GET", token, getReq)
-	var fi FileGetResponse
+	var fi models.FileGetResponse
 	err = json.Unmarshal(body, &fi)
 	if err != nil {
 		return fmt.Errorf("Failed to get the file information for the file name given (%s): %v", filename, err)

@@ -21,8 +21,9 @@ import (
 const (
 	testServerAddr = ":8080"
 	testHost       = "http://127.0.0.1:8080"
-	testFilename1  = "unit_test_1.dat"
-	testFilename2  = "unit_test_2.dat"
+	testDataDir    = "testdata"
+	testFilename1  = "testdata/unit_test_1.dat"
+	testFilename2  = "testdata/unit_test_2.dat"
 )
 
 var (
@@ -52,6 +53,9 @@ func TestMain(m *testing.M) {
 	*flagChunkSize = 1024 * 1024 * 4
 	*flagExtraStrict = true
 	*argListenAddr = testServerAddr
+
+	// make sure the test data folder exists
+	os.Mkdir(testDataDir, os.ModeDir|os.ModePerm)
 
 	// write out some random files
 	rand.Seed(time.Now().Unix())
@@ -126,7 +130,7 @@ func TestEverything(t *testing.T) {
 	t.Logf("Synced the file %s ...", filename)
 
 	// now we get a chunk list for the file
-	var remoteChunks FileChunksGetResponse
+	var remoteChunks models.FileChunksGetResponse
 	target := fmt.Sprintf("%s/api/chunk/%d", testHost, fileID)
 	body, err := runAuthRequest(target, "GET", token, nil)
 	err = json.Unmarshal(body, &remoteChunks)

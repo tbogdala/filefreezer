@@ -12,7 +12,6 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
-	"github.com/tbogdala/filefreezer"
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
 )
 
@@ -93,12 +92,6 @@ func handleUsersLogin(state *models.State) http.HandlerFunc {
 	}
 }
 
-// AllFilesGetResponse is the JSON serializable response given by the
-// /api/files GET handlder.
-type AllFilesGetResponse struct {
-	Files []filefreezer.FileInfo
-}
-
 // handleGetAllFiles returns a JSON object with all of the FileInfo objects in Storage
 // that are bound to the user id authorized in the context of the call.
 func handleGetAllFiles(state *models.State) http.HandlerFunc {
@@ -118,23 +111,10 @@ func handleGetAllFiles(state *models.State) http.HandlerFunc {
 			return
 		}
 
-		writeJSONResponse(w, &AllFilesGetResponse{
+		writeJSONResponse(w, &models.AllFilesGetResponse{
 			Files: allFileInfos,
 		})
 	}
-}
-
-// FileGetResponse is the JSON serializable response given by the
-// /api/file/{id} GET handlder.
-type FileGetResponse struct {
-	filefreezer.FileInfo
-	MissingChunks []int
-}
-
-// FileGetByNameRequest is the JSON structure to be sent to the
-// /api/file/name GET handler.
-type FileGetByNameRequest struct {
-	FileName string
 }
 
 // handleGetFileByName returns a JSON object with all of the FileInfo data for the file in Storage
@@ -150,7 +130,7 @@ func handleGetFileByName(state *models.State) http.HandlerFunc {
 		userCreds := userCredsI.(*userCredentialsContext)
 
 		// deserialize the JSON object that should be in the request body
-		var req FileGetByNameRequest
+		var req models.FileGetByNameRequest
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, "Failed to read the request body: "+err.Error(), http.StatusBadRequest)
@@ -176,7 +156,7 @@ func handleGetFileByName(state *models.State) http.HandlerFunc {
 			return
 		}
 
-		writeJSONResponse(w, &FileGetResponse{
+		writeJSONResponse(w, &models.FileGetResponse{
 			FileInfo:      *fi,
 			MissingChunks: missingChunks,
 		})
@@ -217,17 +197,11 @@ func handleGetFile(state *models.State) http.HandlerFunc {
 			return
 		}
 
-		writeJSONResponse(w, &FileGetResponse{
+		writeJSONResponse(w, &models.FileGetResponse{
 			FileInfo:      *fi,
 			MissingChunks: missingChunks,
 		})
 	}
-}
-
-// FileChunkPutResponse is the JSON serializable response given by the
-// /api/chunk/{id}/{chunknum} PUT handlder.
-type FileChunkPutResponse struct {
-	Status bool
 }
 
 // handleGetFile returns a JSON object with all of the FileInfo data for the file in Storage
@@ -277,16 +251,10 @@ func handlePutFileChunk(state *models.State) http.HandlerFunc {
 			return
 		}
 
-		writeJSONResponse(w, &FileChunkPutResponse{
+		writeJSONResponse(w, &models.FileChunkPutResponse{
 			Status: true,
 		})
 	}
-}
-
-// FileChunksGetResponse is the JSON serializable response given by the
-// /api/chunk/{fileid}/ GET handlder.
-type FileChunksGetResponse struct {
-	Chunks []filefreezer.FileChunk
 }
 
 // handleGetFile returns a JSON object with all of the FileInfo data for the file in Storage
@@ -314,16 +282,10 @@ func handleGetFileChunks(state *models.State) http.HandlerFunc {
 			http.Error(w, "Failed to get the chunk informations for the file id in the URI.", http.StatusBadRequest)
 			return
 		}
-		writeJSONResponse(w, &FileChunksGetResponse{
-			chunks,
+		writeJSONResponse(w, &models.FileChunksGetResponse{
+			Chunks: chunks,
 		})
 	}
-}
-
-// FileChunkGetResponse is the JSON serializable response given by the
-// /api/chunk/{fileid}/{chunknumber} GET handlder.
-type FileChunkGetResponse struct {
-	Chunk filefreezer.FileChunk
 }
 
 // handleGetFile returns a JSON object with all of the FileInfo data for the file in Storage
@@ -368,25 +330,10 @@ func handleGetFileChunk(state *models.State) http.HandlerFunc {
 			return
 		}
 
-		writeJSONResponse(w, &FileChunkGetResponse{
-			*chunk,
+		writeJSONResponse(w, &models.FileChunkGetResponse{
+			Chunk: *chunk,
 		})
 	}
-}
-
-// FilePutResponse is the JSON serializable response given by the
-// /api/files PUT handlder.
-type FilePutResponse struct {
-	FileID int
-}
-
-// FilePutResponse is the JSON serializable request object sent to the
-// /api/files PUT handlder.
-type FilePutRequest struct {
-	FileName   string
-	LastMod    int64
-	ChunkCount int
-	FileHash   string
 }
 
 // handlePutFile registers a file for a given user.
@@ -402,7 +349,7 @@ func handlePutFile(state *models.State) http.HandlerFunc {
 		userCreds := userCredsI.(*userCredentialsContext)
 
 		// deserialize the JSON object that should be in the request body
-		var req FilePutRequest
+		var req models.FilePutRequest
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, "Failed to read the request body: "+err.Error(), http.StatusBadRequest)
@@ -439,22 +386,10 @@ func handlePutFile(state *models.State) http.HandlerFunc {
 			return
 		}
 
-		writeJSONResponse(w, &FilePutResponse{
-			fi.FileID,
+		writeJSONResponse(w, &models.FilePutResponse{
+			FileID: fi.FileID,
 		})
 	}
-}
-
-// FileDeleteRequest is the JSON serializable request object sent to the
-// /api/files/{id} DELETE handlder.
-type FileDeleteRequest struct {
-	FileID int
-}
-
-// FileDeleteResponse is the JSON serializable response object from
-// /api/file/{id} DELETE handler.
-type FileDeleteResponse struct {
-	Success bool
 }
 
 func handleDeleteFile(state *models.State) http.HandlerFunc {
@@ -483,7 +418,7 @@ func handleDeleteFile(state *models.State) http.HandlerFunc {
 			return
 		}
 
-		writeJSONResponse(w, &FileDeleteResponse{true})
+		writeJSONResponse(w, &models.FileDeleteResponse{Success: true})
 	}
 }
 
