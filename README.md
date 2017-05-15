@@ -18,11 +18,13 @@ Installation
 The following dependencies will need to be installed:
 
 ```bash
+go get golang.org/x/crypto/bcrypt
 go get github.com/dgrijalva/jwt-go
 go get github.com/gorilla/mux
 go get gopkg.in/alecthomas/kingpin.v2
 go get golang.org/x/net/http2
-
+go get github.com/mattn/go-sqlite3
+go get github.com/spf13/afero
 ```
 
 RSA keys for JWT token signing can be created with openssl:
@@ -38,6 +40,8 @@ The self-signed TLS keys for serving HTTP/2 over HTTPS can be created with opens
 ```bash
 cd cmd/freezer/certgen
 go run generate_cert.go -ca -ecdsa-curve P384 -host 127.0.0.1
+mv cert.pem ../freezer.crt
+mv key.pem ../freezer.key
 ```
 
 In production, you'll want to use your own valid certificate public and private keys.
@@ -53,10 +57,6 @@ TODO / Notes
   * salt created on user password creation
   * bcrypt2 (salt + pw hash) stored in database
   * ref: https://crackstation.net/hashing-security.htm
-
-* server testing considerations
-  * make authentication an interface for a dummy test replacement
-  * make a filesystem interface dummy for testing
 
 * flag: file hashing algo
 * flag: encrypt files

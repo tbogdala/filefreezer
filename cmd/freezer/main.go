@@ -56,6 +56,12 @@ var (
 	argRmFileName = cmdRmFile.Arg("username", "The username for user.").Required().String()
 	argRmFilePass = cmdRmFile.Arg("password", "The password for user.").Required().String()
 	argRmFilePath = cmdRmFile.Arg("filename", "The file to remove on the server.").Required().String()
+
+	cmdSync     = appFlags.Command("sync", "Synchronizes a path with the server.")
+	argSyncHost = cmdSync.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
+	argSyncName = cmdSync.Arg("username", "The username for user.").Required().String()
+	argSyncPass = cmdSync.Arg("password", "The password for user.").Required().String()
+	argSyncPath = cmdSync.Arg("filepath", "The file to sync with the server.").Required().String()
 )
 
 func main() {
@@ -142,6 +148,22 @@ func main() {
 		err = runRmFile(target, authToken, filepath)
 		if err != nil {
 			log.Fatalf("Failed to remove file from the server %s: %v", target, err)
+		}
+
+	case cmdSync.FullCommand():
+		target := *argSyncHost
+		username := *argSyncName
+		password := *argSyncPass
+		filepath := *argSyncPath
+
+		authToken, err := runUserAuthenticate(target, username, password)
+		if err != nil {
+			log.Fatalf("Failed to authenticate to the server %s: %v", target, err)
+		}
+
+		_, _, err = runSyncFile(target, authToken, filepath)
+		if err != nil {
+			log.Fatalf("Failed to synchronize the path %s: %v", filepath, err)
 		}
 	}
 }

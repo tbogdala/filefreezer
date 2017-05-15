@@ -272,10 +272,10 @@ func runAddFile(hostURI string, token string, fileName string, lastMod int64, ch
 }
 
 const (
-	syncStatusMissing    = 1
-	syncStatusLocalNewer = 2
-	syncStatusLocalOlder = 3
-	syncStatusSame       = 4
+	syncStatusMissing     = 1
+	syncStatusLocalNewer  = 2
+	syncStatusRemoteNewer = 3
+	syncStatusSame        = 4
 )
 
 func runSyncFile(hostURI string, token string, filename string) (status int, changeCount int, e error) {
@@ -287,9 +287,33 @@ func runSyncFile(hostURI string, token string, filename string) (status int, cha
 	getReq.FileName = filename
 	target := fmt.Sprintf("%s/api/file/name", hostURI)
 	body, err := runAuthRequest(target, "GET", token, getReq)
+
+	// if the file is not registered with the storage server, then upload it ...
+	// futher checking will be unnecessary.
+	if err != nil {
+		localChunkCount, localLastMod, localHash, err := filefreezer.CalcFileHashInfo(*flagChunkSize, filename)
+		if err != nil {
+			return syncStatusMissing, 0, fmt.Errorf("Failed to calculate the file hash data for %s: %v", filename, err)
+		}
+		ulCount, err := syncUpload(hostURI, token, filename, localLastMod, localChunkCount, localHash)
+		if err != nil {
+			return syncStatusMissing, ulCount, fmt.Errorf("Failed to upload the file to the server %s: %v", hostURI, err)
+		}
+		return syncStatusLocalNewer, ulCount, nil
+	}
+
+	// we got a valid response so the file is registered on the server;
+	// continue checking...
 	err = json.Unmarshal(body, &remote)
 	if err != nil {
 		return 0, 0, fmt.Errorf("Failed to get the file information for the file name given (%s): %v", filename, err)
+	}
+
+	// if the local file doesn't exist then download the file from the server if
+	// it is registered there.
+	if _, err := os.Stat(filename); os.IsNotExist(err) {
+		dlCount, err := syncDownload(hostURI, token, remote.FileID, filename, remote.ChunkCount)
+		return syncStatusRemoteNewer, dlCount, err
 	}
 
 	// calculate some of the local file information
@@ -325,6 +349,8 @@ func runSyncFile(hostURI string, token string, filename string) (status int, cha
 
 					// do the hashes match?
 					if strings.Compare(chunkHash, remoteChunks.Chunks[i].ChunkHash) != 0 {
+						// FIXME: At this point we have a chunk difference and it should be left to
+						// the client as to which source to trust for the correct file, local or remote.
 						different = true
 						return false, nil
 					}
@@ -351,11 +377,12 @@ func runSyncFile(hostURI string, token string, filename string) (status int, cha
 	}
 
 	if localLastMod < remote.LastMod {
-		e = syncDownload(filename)
-		return syncStatusLocalOlder, 0, e
+		dlCount, e := syncDownload(hostURI, token, remote.FileID, filename, remote.ChunkCount)
+		return syncStatusRemoteNewer, dlCount, e
 	}
 
-	// we have the same lastmod times at this point. check for missing chunks to send
+	// there's been a difference detected in the files, but the mod times were the same, so
+	// we attempt to upload any missing chunks.
 	if len(remote.MissingChunks) > 0 {
 		ulCount, e := syncUploadMissing(hostURI, token, remote.FileID, filename, localChunkCount)
 		return syncStatusMissing, ulCount, e
@@ -403,20 +430,24 @@ func syncUploadNewer(hostURI string, token string, remoteFileID int,
 	filename string, localLastMod int64, localChunkCount int, localHash string) (uploadCount int, e error) {
 	// delete the remote file
 	target := fmt.Sprintf("%s/api/file/%d", hostURI, remoteFileID)
-	body, err := runAuthRequest(target, "DELETE", token, nil)
+	_, err := runAuthRequest(target, "DELETE", token, nil)
 	if err != nil {
 		return 0, fmt.Errorf("Failed to remove the file %d: %v", remoteFileID, err)
 	}
 	log.Printf("%s XXX deleted remote", filename)
 
+	return syncUpload(hostURI, token, filename, localLastMod, localChunkCount, localHash)
+}
+
+func syncUpload(hostURI string, token string, filename string, localLastMod int64, localChunkCount int, localHash string) (uploadCount int, e error) {
 	// establish a new file on the remote freezer
 	var putReq models.FilePutRequest
 	putReq.FileName = filename
 	putReq.LastMod = localLastMod
 	putReq.ChunkCount = localChunkCount
 	putReq.FileHash = localHash
-	target = fmt.Sprintf("%s/api/files", hostURI)
-	body, err = runAuthRequest(target, "POST", token, putReq)
+	target := fmt.Sprintf("%s/api/files", hostURI)
+	body, err := runAuthRequest(target, "POST", token, putReq)
 	if err != nil {
 		return 0, err
 	}
@@ -448,7 +479,7 @@ func syncUploadNewer(hostURI string, token string, remoteFileID int,
 			return false, fmt.Errorf("Failed to upload the chunk to the server: %v", err)
 		}
 
-		log.Printf("%s +++ %d / %d", filename, i+1, localChunkCount)
+		log.Printf("%s >>> %d / %d", filename, i+1, localChunkCount)
 		uploadCount++
 
 		return true, nil
@@ -461,8 +492,46 @@ func syncUploadNewer(hostURI string, token string, remoteFileID int,
 	return uploadCount, nil
 }
 
-func syncDownload(filename string) error {
-	return fmt.Errorf("IMPLEMENT")
+func syncDownload(hostURI string, token string, remoteID int, filename string, chunkCount int) (downloadCount int, e error) {
+	localFile, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.ModePerm)
+	if err != nil {
+		return 0, fmt.Errorf("Failed to open local file (%s) for writing: %v", filename, err)
+	}
+	defer localFile.Close()
+
+	// download each chunk and write it out to the file
+	chunksWritten := 0
+	for i := 0; i < chunkCount; i++ {
+		target := fmt.Sprintf("%s/api/chunk/%d/%d", hostURI, remoteID, i)
+		body, err := runAuthRequest(target, "GET", token, nil)
+		if err != nil {
+			return chunksWritten, fmt.Errorf("Failed to get the file chunk #%d for file id%d: %v", i, remoteID, err)
+		}
+
+		var chunkResp models.FileChunkGetResponse
+		err = json.Unmarshal(body, &chunkResp)
+		if err != nil {
+			return chunksWritten, fmt.Errorf("Failed to get the file chunk #%d for file id%d: %v", i, remoteID, err)
+		}
+
+		// trim the buffer at the EOF marker of byte(0)
+		chunk := chunkResp.Chunk.Chunk
+		eofIndex := bytes.IndexByte(chunk, byte(0))
+		if eofIndex > 0 && eofIndex < len(chunk) {
+			chunk = chunk[:eofIndex]
+		}
+
+		_, err = localFile.Write(chunk)
+		if err != nil {
+			return chunksWritten, fmt.Errorf("Failed to write to the #%d chunk to the local file %s: %v", i, filename, err)
+		}
+
+		log.Printf("%s <<< %d / %d", filename, i+1, chunkCount)
+		chunksWritten++
+	}
+
+	log.Printf("%s <== downloaded", filename)
+	return chunksWritten, nil
 }
 
 type eachChunkFunc func(chunkNumber int, chunk []byte) (bool, error)

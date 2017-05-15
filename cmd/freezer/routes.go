@@ -44,7 +44,7 @@ func InitRoutes(state *models.State) *mux.Router {
 	// get a file chunk
 	r.Handle("/api/chunk/{fileid}/{chunknumber}", authenticateToken(state, handleGetFileChunk(state))).Methods("GET")
 
-	// get all known file chunks (except the chunks themselvesl)
+	// get all known file chunks (except the chunks themselves)
 	r.Handle("/api/chunk/{fileid}", authenticateToken(state, handleGetFileChunks(state))).Methods("GET")
 
 	return r

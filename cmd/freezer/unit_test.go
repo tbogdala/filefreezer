@@ -14,6 +14,9 @@ import (
 
 	"io/ioutil"
 
+	"bytes"
+
+	"github.com/spf13/afero"
 	"github.com/tbogdala/filefreezer"
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
 )
@@ -28,6 +31,7 @@ const (
 
 var (
 	state *models.State
+	AppFs afero.Fs = afero.NewOsFs()
 )
 
 // TODO: make a test upload a file exactly 2xChunkSize and then sync it
@@ -164,6 +168,83 @@ func TestEverything(t *testing.T) {
 		t.Fatalf("The first sync of the changed test file should have uploaded 3 chunks but it uploaded %d.", ulCount)
 	}
 
-	t.Logf("Synced the file %s again ...", filename)
+	// read the local file into a byte array for test purposes
+	originalTestFile, err := ioutil.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("Couldn't read local test file %s: %v", filename, err)
+	}
+
+	// delete the local file and run sync again to download
+	err = os.Remove(filename)
+	if err != nil {
+		t.Fatalf("Failed to delete the local test file %s: %v", filename, err)
+	}
+	syncStatus, dlCount, err := runSyncFile(testHost, token, filename)
+	if err != nil {
+		t.Fatalf("Failed to sync the file %s from the server: %v", filename, err)
+	}
+	if syncStatus != syncStatusRemoteNewer {
+		t.Fatalf("Sync after regeneration should be newer for file %s (%d)", filename, syncStatus)
+	}
+	if dlCount != 3 {
+		t.Fatalf("The sync of the changed test file should have downloaded 3 chunks but it downloaded %d.", dlCount)
+	}
+
+	// read in the downloaded file and then compare the bytes
+	downloadedTestFile, err := ioutil.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("Couldn't read local test file %s: %v", filename, err)
+	}
+	if bytes.Compare(originalTestFile, downloadedTestFile) != 0 {
+		t.Fatalf("The sync of file %s failed to download an identical copy.", filename)
+	}
+
+	// generate some new test bytes
+	frankenBytes := genRandomBytes(int(*flagChunkSize) * 3)
+	err = ioutil.WriteFile(filename, frankenBytes, os.ModePerm)
+	if err != nil {
+		t.Fatalf("Couldn't write original bytes back out to the file %s: %v", filename, err)
+	}
+
+	// set the modified and access times back 2 minutes
+	testTime := time.Now().Add(time.Second * -120)
+	err = AppFs.Chtimes(filename, testTime, testTime)
+	if err != nil {
+		t.Fatalf("Couldn't set the filesystem times for the test file %s: %v", filename, err)
+	}
+
+	// syncing again should pull a new copy down
+	syncStatus, dlCount, err = runSyncFile(testHost, token, filename)
+	if err != nil {
+		t.Fatalf("Failed to sync the file %s from the server: %v", filename, err)
+	}
+	if syncStatus != syncStatusRemoteNewer {
+		t.Fatalf("Sync after regeneration should be newer for file %s (%d)", filename, syncStatus)
+	}
+	if dlCount != 3 {
+		t.Fatalf("The sync of the changed test file should have downloaded 3 chunks but it downloaded %d.", dlCount)
+	}
+
+	// read in the downloaded file and then compare the bytes
+	downloadedTestFile, err = ioutil.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("Couldn't read local test file %s: %v", filename, err)
+	}
+	if bytes.Compare(originalTestFile, downloadedTestFile) != 0 {
+		t.Fatalf("The sync of file %s failed to download an identical copy.", filename)
+	}
+
+	// test syncing a file not registered on the server
+	filename = testFilename2
+	syncStatus, ulCount, err = runSyncFile(testHost, token, filename)
+	if err != nil {
+		t.Fatalf("Failed to sync the file %s from the server: %v", filename, err)
+	}
+	if syncStatus != syncStatusLocalNewer {
+		t.Fatalf("Sync after regeneration should be newer for file %s (%d)", filename, syncStatus)
+	}
+	if ulCount != 3 {
+		t.Fatalf("The sync of the changed test file should have downloaded 3 chunks but it downloaded %d.", dlCount)
+	}
 
 }
