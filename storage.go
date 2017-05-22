@@ -65,9 +65,10 @@ const (
 	getAllFileChunksByID = `SELECT ChunkNum, ChunkHash FROM FileChunks WHERE FileID = ?;`
 	addFileChunk         = `INSERT OR REPLACE INTO FileChunks (FileID, ChunkNum, ChunkHash, Chunk) 
 							  VALUES (?, ?, ?, ?);`
-	removeAllFileChunks = `DELETE FROM FileChunks WHERE FileID = ?;`
-	removeFileChunk     = `DELETE FROM FileChunks WHERE FileID = ? AND ChunkNum = ?;`
-	getFileChunk        = `SELECT ChunkHash, Chunk FROM FileChunks WHERE FileID = ? AND ChunkNum = ?;`
+	removeAllFileChunks   = `DELETE FROM FileChunks WHERE FileID = ?;`
+	removeFileChunk       = `DELETE FROM FileChunks WHERE FileID = ? AND ChunkNum = ?;`
+	getFileChunk          = `SELECT ChunkHash, Chunk FROM FileChunks WHERE FileID = ? AND ChunkNum = ?;`
+	getFileTotalChunkSize = "SELECT SUM(LENGTH(Chunk)) FROM FileChunks WHERE FileID = ?;"
 )
 
 // FileInfo contains the information stored about a given file for a particular user.
@@ -363,10 +364,33 @@ func (s *Storage) RemoveFile(userID, fileID int) error {
 			return fmt.Errorf("failed to remove a file info in the database: %v", err)
 		}
 
+		// get the total size for all chunks attached to the file id
+		var totalChunkSize int
+		err = tx.QueryRow(getFileTotalChunkSize, fileID).Scan(&totalChunkSize)
+		if err != nil {
+			return fmt.Errorf("failed to get the chunk sizes for a file in the database: %v", err)
+		}
+
 		// remove all of the file chunks
 		_, err = tx.Exec(removeAllFileChunks, fileID)
 		if err != nil {
 			return fmt.Errorf("failed to delete the file chunks associated with the file: %v", err)
+		}
+
+		// update the allocation counts
+		if totalChunkSize > 0 {
+			res, err := tx.Exec(updateUserStats, -totalChunkSize, userID)
+			if err != nil {
+				return fmt.Errorf("failed to update the allocated bytes in the database after removing chunks: %v", err)
+			}
+
+			// make sure one row was affected with the UPDATE statement
+			affected, err := res.RowsAffected()
+			if affected != 1 {
+				return fmt.Errorf("failed to update the user info in the database after removing chunks; no rows were affected")
+			} else if err != nil {
+				return fmt.Errorf("failed to update the user info in the database after removing chunks: %v", err)
+			}
 		}
 
 		// if no rows were affected, that just means there were no chunks that

@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/tbogdala/filefreezer"
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
 )
 
@@ -22,6 +23,9 @@ func InitRoutes(state *models.State) *mux.Router {
 
 	// setup the user login handler
 	r.Handle("/api/users/login", handleUsersLogin(state)).Methods("POST")
+
+	// returns the authenticated users's current stats such as quota, allocation and revision counts
+	r.Handle("/api/user/stats", authenticateToken(state, handleGetUserStats(state))).Methods("GET")
 
 	// returns all files and their whole-file hash
 	r.Handle("/api/files", authenticateToken(state, handleGetAllFiles(state))).Methods("GET")
@@ -89,6 +93,33 @@ func handleUsersLogin(state *models.State) http.HandlerFunc {
 		}
 
 		writeJSONResponse(w, &UserLoginResponse{token})
+	}
+}
+
+// handleGetUserStats returns a JSON object with the authenticated user's current
+// stats susch as the quota, allocated byte count and current revision number.
+func handleGetUserStats(state *models.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
+		if userCredsI == nil {
+			http.Error(w, "Failed to get the user credentials.", http.StatusUnauthorized)
+			return
+		}
+		userCreds := userCredsI.(*userCredentialsContext)
+
+		stats, err := state.Storage.GetUserStats(userCreds.ID)
+		if err != nil {
+			http.Error(w, "Failed to get the user stats information for the authenticated user.", http.StatusBadRequest)
+			return
+		}
+		writeJSONResponse(w, &models.UserStatsGetResponse{
+			Stats: filefreezer.UserStats{
+				Quota:     stats.Quota,
+				Allocated: stats.Allocated,
+				Revision:  stats.Revision,
+			},
+		})
 	}
 }
 

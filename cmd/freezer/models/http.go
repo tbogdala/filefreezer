@@ -5,6 +5,12 @@ package models
 
 import "github.com/tbogdala/filefreezer"
 
+// UserStatsGetResponse is the JSON serializable response given by the
+// /api/user/stats GET handler.
+type UserStatsGetResponse struct {
+	Stats filefreezer.UserStats
+}
+
 // AllFilesGetResponse is the JSON serializable response given by the
 // /api/files GET handlder.
 type AllFilesGetResponse struct {

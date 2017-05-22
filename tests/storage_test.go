@@ -318,11 +318,29 @@ func TestBasicDBCreation(t *testing.T) {
 		t.Fatalf("Failed to add file chunks: %v", err)
 	}
 
+	// pull the stats before removing the file to make sure the allocation
+	// count changes correctly
+	userStats, err := store.GetUserStats(first.UserID)
+	if err != nil {
+		t.Fatalf("Failed to get the user stats for user id %d: %v", first.UserID, err)
+	}
+
 	// now test wiping out the file completely
 	err = store.RemoveFile(first.UserID, first.FileID)
 	if err != nil {
 		t.Fatalf("Failed to remove the file and all of the file chunks: %v", err)
 	}
+
+	// check to make sure the allocated count changed
+	oldAllocation := userStats.Allocated
+	userStats, err = store.GetUserStats(first.UserID)
+	if err != nil {
+		t.Fatalf("Failed to get the user stats for user id %d: %v", first.UserID, err)
+	}
+	if userStats.Allocated >= oldAllocation {
+		t.Fatalf("The allocation count did not go down after removing a file (pre: %d ; post: %d).", oldAllocation, userStats.Allocated)
+	}
+
 	// make sure we can't get the file chunk or the file info
 	_, err = store.GetFileChunk(first.FileID, 0)
 	if err == nil {

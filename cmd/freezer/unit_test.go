@@ -92,7 +92,8 @@ func TestEverything(t *testing.T) {
 	// create a test user
 	username := "admin"
 	password := "1234"
-	user := runAddUser(state.Storage, username, password, 1e9)
+	userQuota := int(1e9)
+	user := runAddUser(state.Storage, username, password, userQuota)
 	if user == nil {
 		t.Fatalf("Failed to add the test user (%s) to Storage", username)
 	}
@@ -104,6 +105,18 @@ func TestEverything(t *testing.T) {
 	}
 	t.Logf("User authenticated ...")
 
+	// getting the user stats now should have default quota and otherwise empty settings
+	userStats, err := runUserStats(testHost, token)
+	if err != nil {
+		t.Fatalf("Failed to get the user stats: %v", err)
+	}
+	if userStats.Quota != userQuota {
+		t.Fatalf("Got the wrong quota for the authenticated user: %d", userStats.Quota)
+	}
+	if userStats.Allocated != 0 {
+		t.Fatalf("Got the wrong allocation count for the authenticated user: %d", userStats.Allocated)
+	}
+
 	// pull all the file infos ... should be empty
 	allFiles, err := runGetAllFileHashes(testHost, token)
 	if err != nil {
@@ -112,6 +125,16 @@ func TestEverything(t *testing.T) {
 		t.Fatalf("Expected to get an empty slice of FileInfo, but instead got one of length %d.", len(allFiles))
 	}
 	t.Logf("Got all of the file names (%d) ...", len(allFiles))
+
+	// the revision should not have changed by only getting the file hashes
+	oldRevision := userStats.Revision
+	userStats, err = runUserStats(testHost, token)
+	if err != nil {
+		t.Fatalf("Failed to get the user stats: %v", err)
+	}
+	if userStats.Revision != oldRevision {
+		t.Fatalf("The revision count didn't update as expected for the authenticated user: %d", userStats.Revision)
+	}
 
 	// test adding a file
 	filename := testFilename1
@@ -127,6 +150,16 @@ func TestEverything(t *testing.T) {
 	}
 	t.Logf("Added file %s (id: %d) ...", filename, fileID)
 
+	// at this point we should have a different revision
+	oldRevision = userStats.Revision
+	userStats, err = runUserStats(testHost, token)
+	if err != nil {
+		t.Fatalf("Failed to get the user stats: %v", err)
+	}
+	if userStats.Revision <= oldRevision {
+		t.Fatalf("The revision count didn't update as expected for the authenticated user: %d", userStats.Revision)
+	}
+
 	// now that the file is registered, sync the data
 	syncStatus, ulCount, err := runSyncFile(testHost, token, filename, filename)
 	if err != nil {
@@ -139,6 +172,16 @@ func TestEverything(t *testing.T) {
 		t.Fatalf("The first sync of the first test file should be identical, but sync said %d chunks were uploaded.", ulCount)
 	}
 	t.Logf("Synced the file %s ...", filename)
+
+	// at this point we should have the same revision because the file was unchanged
+	oldRevision = userStats.Revision
+	userStats, err = runUserStats(testHost, token)
+	if err != nil {
+		t.Fatalf("Failed to get the user stats: %v", err)
+	}
+	if userStats.Revision != oldRevision {
+		t.Fatalf("The revision count didn't update as expected for the authenticated user: %d", userStats.Revision)
+	}
 
 	// now we get a chunk list for the file
 	var remoteChunks models.FileChunksGetResponse
@@ -153,12 +196,22 @@ func TestEverything(t *testing.T) {
 			filename, len(remoteChunks.Chunks), chunkCount, remoteChunks)
 	}
 
+	// at this point we should have the same revision
+	oldRevision = userStats.Revision
+	userStats, err = runUserStats(testHost, token)
+	if err != nil {
+		t.Fatalf("Failed to get the user stats: %v", err)
+	}
+	if userStats.Revision != oldRevision {
+		t.Fatalf("The revision count didn't update as expected for the authenticated user: %d", userStats.Revision)
+	}
+
 	// sleep a second then regenerate the file
 	time.Sleep(time.Second)
 	rando1 := genRandomBytes(int(*flagChunkSize * 3))
 	ioutil.WriteFile(filename, rando1, os.ModePerm)
 
-	// now that the file is registered, sync the data
+	// now that the file is regenerated, sync the data
 	syncStatus, ulCount, err = runSyncFile(testHost, token, filename, filename)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s to the server: %v", filename, err)
@@ -169,6 +222,21 @@ func TestEverything(t *testing.T) {
 	if ulCount != 3 {
 		t.Fatalf("The first sync of the changed test file should have uploaded 3 chunks but it uploaded %d.", ulCount)
 	}
+
+	// set the old revision count here to test below and make sure that
+	// allocation counts stayed the same since the file synced above is the same size
+	oldAllocation := userStats.Allocated
+	userStats, err = runUserStats(testHost, token)
+	if err != nil {
+		t.Fatalf("Failed to get the user stats: %v", err)
+	}
+	if userStats.Allocated != oldAllocation {
+		t.Fatalf("Allocation counts changed for syncing a file of the same size.")
+	}
+	if userStats.Revision <= oldRevision {
+		t.Fatalf("Revision should have changed after regenerating a file.")
+	}
+	oldRevision = userStats.Revision
 
 	// read the local file into a byte array for test purposes
 	originalTestFile, err := ioutil.ReadFile(filename)
@@ -199,6 +267,16 @@ func TestEverything(t *testing.T) {
 	}
 	if bytes.Compare(originalTestFile, downloadedTestFile) != 0 {
 		t.Fatalf("The sync of file %s failed to download an identical copy.", filename)
+	}
+
+	// at this point we should have the same revision
+	oldRevision = userStats.Revision
+	userStats, err = runUserStats(testHost, token)
+	if err != nil {
+		t.Fatalf("Failed to get the user stats: %v", err)
+	}
+	if userStats.Revision != oldRevision {
+		t.Fatalf("The revision count didn't update as expected for the authenticated user: %d", userStats.Revision)
 	}
 
 	// generate some new test bytes
@@ -236,6 +314,16 @@ func TestEverything(t *testing.T) {
 		t.Fatalf("The sync of file %s failed to download an identical copy.", filename)
 	}
 
+	// at this point we should have the same revision
+	oldRevision = userStats.Revision
+	userStats, err = runUserStats(testHost, token)
+	if err != nil {
+		t.Fatalf("Failed to get the user stats: %v", err)
+	}
+	if userStats.Revision != oldRevision {
+		t.Fatalf("The revision count didn't update as expected for the authenticated user: %d", userStats.Revision)
+	}
+
 	// test syncing a file not registered on the server
 	filename = testFilename2
 	syncStatus, ulCount, err = runSyncFile(testHost, token, filename, filename)
@@ -247,6 +335,20 @@ func TestEverything(t *testing.T) {
 	}
 	if ulCount != 3 {
 		t.Fatalf("The sync of the changed test file should have downloaded 3 chunks but it downloaded %d.", dlCount)
+	}
+
+	// at this point we should have different allocation and revision
+	oldAllocation = userStats.Allocated
+	oldRevision = userStats.Revision
+	userStats, err = runUserStats(testHost, token)
+	if err != nil {
+		t.Fatalf("Failed to get the user stats: %v", err)
+	}
+	if userStats.Revision <= oldRevision {
+		t.Fatalf("The revision count didn't update as expected for the authenticated user: %d", userStats.Revision)
+	}
+	if userStats.Allocated <= oldAllocation {
+		t.Fatalf("The allocation count didn't update as expected for the authenticated user: %d", userStats.Allocated)
 	}
 
 	// effectively make a copy of the file by adding a test file under a different target path
@@ -261,6 +363,21 @@ func TestEverything(t *testing.T) {
 	if ulCount != 3 {
 		t.Fatalf("The sync of the changed test file should have downloaded 3 chunks but it downloaded %d.", dlCount)
 	}
+
+	// at this point we should have different allocation and revision
+	oldAllocation = userStats.Allocated
+	oldRevision = userStats.Revision
+	userStats, err = runUserStats(testHost, token)
+	if err != nil {
+		t.Fatalf("Failed to get the user stats: %v", err)
+	}
+	if userStats.Revision <= oldRevision {
+		t.Fatalf("The revision count didn't update as expected for the authenticated user: %d", userStats.Revision)
+	}
+	if userStats.Allocated <= oldAllocation {
+		t.Fatalf("The allocation count didn't update as expected for the authenticated user: %d", userStats.Allocated)
+	}
+	aliasedAllocation := userStats.Allocated - oldAllocation
 
 	// confirm that there's a new file by getting the total list of files
 	allFiles, err = runGetAllFileHashes(testHost, token)
@@ -279,4 +396,23 @@ func TestEverything(t *testing.T) {
 	if missingAliasedFile {
 		t.Fatalf("Alised file (%s) didn't show up in the file hash list.", aliasedFilename)
 	}
+
+	// remove the aliased file and make sure the allocation count decreases by the same amount
+	err = runRmFile(testHost, token, aliasedFilename)
+	if err != nil {
+		t.Fatalf("Failed to remove the aliased file from the server: %v", err)
+	}
+	oldAllocation = userStats.Allocated
+	oldRevision = userStats.Revision
+	userStats, err = runUserStats(testHost, token)
+	if err != nil {
+		t.Fatalf("Failed to get the user stats: %v", err)
+	}
+	if userStats.Revision <= oldRevision {
+		t.Fatalf("The revision count didn't update as expected for the authenticated user: %d", userStats.Revision)
+	}
+	if userStats.Allocated != oldAllocation-aliasedAllocation {
+		t.Fatalf("The allocation count didn't update as expected for the authenticated user: %d", userStats.Allocated)
+	}
+
 }

@@ -40,6 +40,11 @@ var (
 	argModUserPass  = cmdModUser.Arg("password", "The password for user.").Required().String()
 	argModUserQuota = cmdModUser.Arg("quota", "The quota size in bytes.").Default("1000000000").Int()
 
+	cmdUserStats     = appFlags.Command("userstats", "Gets the quota, allocation and revision counts for the user.")
+	argUserStatsHost = cmdUserStats.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
+	argUserStatsName = cmdUserStats.Arg("username", "The username for user.").Required().String()
+	argUserStatsPass = cmdUserStats.Arg("password", "The password for user.").Required().String()
+
 	cmdGetFiles     = appFlags.Command("getfiles", "Gets all files for a user in storage.")
 	argGetFilesHost = cmdGetFiles.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
 	argGetFilesName = cmdGetFiles.Arg("username", "The username for user.").Required().String()
@@ -174,6 +179,22 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to synchronize the path %s: %v", filepath, err)
 		}
+
+	case cmdUserStats.FullCommand():
+		target := *argUserStatsHost
+		username := *argUserStatsName
+		password := *argUserStatsPass
+
+		authToken, err := runUserAuthenticate(target, username, password)
+		if err != nil {
+			log.Fatalf("Failed to authenticate to the server %s: %v", target, err)
+		}
+
+		_, err = runUserStats(target, authToken)
+		if err != nil {
+			log.Fatalf("Failed to get the user stats from the server %s: %v", target, err)
+		}
+
 	}
 }
 

@@ -597,6 +597,25 @@ func runRmFile(hostURI string, token string, filename string) error {
 	return nil
 }
 
+func runUserStats(hostURI string, token string) (stats filefreezer.UserStats, e error) {
+	// get the file id for the filename provided
+	target := fmt.Sprintf("%s/api/user/stats", hostURI)
+	body, err := runAuthRequest(target, "GET", token, nil)
+	var r models.UserStatsGetResponse
+	err = json.Unmarshal(body, &r)
+	if err != nil {
+		e = fmt.Errorf("Failed to get the user stats: %v", err)
+		return
+	}
+
+	log.Printf("Quota:     %v\n", r.Stats.Quota)
+	log.Printf("Allocated: %v\n", r.Stats.Allocated)
+	log.Printf("Revision:  %v\n", r.Stats.Revision)
+
+	stats = r.Stats
+	return
+}
+
 // tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
 // connections. It's used so dead TCP connections go away.
 // Source: https://golang.org/src/net/http/server.go
