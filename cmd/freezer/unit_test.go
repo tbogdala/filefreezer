@@ -16,6 +16,8 @@ import (
 
 	"bytes"
 
+	"strings"
+
 	"github.com/spf13/afero"
 	"github.com/tbogdala/filefreezer"
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
@@ -119,14 +121,14 @@ func TestEverything(t *testing.T) {
 	}
 	t.Logf("Calculated hash data for %s ...", filename)
 
-	fileID, err := runAddFile(testHost, token, filename, lastMod, chunkCount, hashString)
+	fileID, err := runAddFile(testHost, token, filename, filename, lastMod, chunkCount, hashString)
 	if err != nil {
 		t.Fatalf("Failed to at the file %s: %v", filename, err)
 	}
 	t.Logf("Added file %s (id: %d) ...", filename, fileID)
 
 	// now that the file is registered, sync the data
-	syncStatus, ulCount, err := runSyncFile(testHost, token, filename)
+	syncStatus, ulCount, err := runSyncFile(testHost, token, filename, filename)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s to the server: %v", filename, err)
 	}
@@ -157,7 +159,7 @@ func TestEverything(t *testing.T) {
 	ioutil.WriteFile(filename, rando1, os.ModePerm)
 
 	// now that the file is registered, sync the data
-	syncStatus, ulCount, err = runSyncFile(testHost, token, filename)
+	syncStatus, ulCount, err = runSyncFile(testHost, token, filename, filename)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s to the server: %v", filename, err)
 	}
@@ -179,7 +181,7 @@ func TestEverything(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to delete the local test file %s: %v", filename, err)
 	}
-	syncStatus, dlCount, err := runSyncFile(testHost, token, filename)
+	syncStatus, dlCount, err := runSyncFile(testHost, token, filename, filename)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s from the server: %v", filename, err)
 	}
@@ -214,7 +216,7 @@ func TestEverything(t *testing.T) {
 	}
 
 	// syncing again should pull a new copy down
-	syncStatus, dlCount, err = runSyncFile(testHost, token, filename)
+	syncStatus, dlCount, err = runSyncFile(testHost, token, filename, filename)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s from the server: %v", filename, err)
 	}
@@ -236,7 +238,7 @@ func TestEverything(t *testing.T) {
 
 	// test syncing a file not registered on the server
 	filename = testFilename2
-	syncStatus, ulCount, err = runSyncFile(testHost, token, filename)
+	syncStatus, ulCount, err = runSyncFile(testHost, token, filename, filename)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s from the server: %v", filename, err)
 	}
@@ -247,4 +249,34 @@ func TestEverything(t *testing.T) {
 		t.Fatalf("The sync of the changed test file should have downloaded 3 chunks but it downloaded %d.", dlCount)
 	}
 
+	// effectively make a copy of the file by adding a test file under a different target path
+	aliasedFilename := "testFolder/" + filename
+	syncStatus, ulCount, err = runSyncFile(testHost, token, filename, aliasedFilename)
+	if err != nil {
+		t.Fatalf("Failed to sync the file %s from the server: %v", filename, err)
+	}
+	if syncStatus != syncStatusLocalNewer {
+		t.Fatalf("Sync after regeneration should be newer for file %s (%d)", filename, syncStatus)
+	}
+	if ulCount != 3 {
+		t.Fatalf("The sync of the changed test file should have downloaded 3 chunks but it downloaded %d.", dlCount)
+	}
+
+	// confirm that there's a new file by getting the total list of files
+	allFiles, err = runGetAllFileHashes(testHost, token)
+	if err != nil {
+		t.Fatalf("Failed to get all of the file hashes: %v", err)
+	} else if len(allFiles) != 3 {
+		t.Fatalf("Expected to get a file hash listing of 3 files, but instead got one of length %d.", len(allFiles))
+	}
+	missingAliasedFile := true
+	for _, fileData := range allFiles {
+		if strings.Compare(fileData.FileName, aliasedFilename) == 0 {
+			missingAliasedFile = false
+			break
+		}
+	}
+	if missingAliasedFile {
+		t.Fatalf("Alised file (%s) didn't show up in the file hash list.", aliasedFilename)
+	}
 }

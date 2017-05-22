@@ -45,11 +45,12 @@ var (
 	argGetFilesName = cmdGetFiles.Arg("username", "The username for user.").Required().String()
 	argGetFilesPass = cmdGetFiles.Arg("password", "The password for user.").Required().String()
 
-	cmdAddFile     = appFlags.Command("addfile", "Put a file into storage.")
-	argAddFileHost = cmdAddFile.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
-	argAddFileName = cmdAddFile.Arg("username", "The username for user.").Required().String()
-	argAddFilePass = cmdAddFile.Arg("password", "The password for user.").Required().String()
-	argAddFilePath = cmdAddFile.Arg("filename", "The file to put on the server.").Required().String()
+	cmdAddFile       = appFlags.Command("addfile", "Put a file into storage.")
+	argAddFileHost   = cmdAddFile.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
+	argAddFileName   = cmdAddFile.Arg("username", "The username for user.").Required().String()
+	argAddFilePass   = cmdAddFile.Arg("password", "The password for user.").Required().String()
+	argAddFilePath   = cmdAddFile.Arg("filename", "The local file to put on the server.").Required().String()
+	argAddFileTarget = cmdAddFile.Arg("target", "The file path to use on the server for the local file; defaults to the same as the filename arg.").Default("").String()
 
 	cmdRmFile     = appFlags.Command("rmfile", "Remove a file from storage.")
 	argRmFileHost = cmdRmFile.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
@@ -57,11 +58,12 @@ var (
 	argRmFilePass = cmdRmFile.Arg("password", "The password for user.").Required().String()
 	argRmFilePath = cmdRmFile.Arg("filename", "The file to remove on the server.").Required().String()
 
-	cmdSync     = appFlags.Command("sync", "Synchronizes a path with the server.")
-	argSyncHost = cmdSync.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
-	argSyncName = cmdSync.Arg("username", "The username for user.").Required().String()
-	argSyncPass = cmdSync.Arg("password", "The password for user.").Required().String()
-	argSyncPath = cmdSync.Arg("filepath", "The file to sync with the server.").Required().String()
+	cmdSync       = appFlags.Command("sync", "Synchronizes a path with the server.")
+	argSyncHost   = cmdSync.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
+	argSyncName   = cmdSync.Arg("username", "The username for user.").Required().String()
+	argSyncPass   = cmdSync.Arg("password", "The password for user.").Required().String()
+	argSyncPath   = cmdSync.Arg("filepath", "The file to sync with the server.").Required().String()
+	argSyncTarget = cmdSync.Arg("target", "The file path to sync to on the server; defaults to the same as the filename arg.").Default("").String()
 )
 
 func main() {
@@ -117,6 +119,10 @@ func main() {
 		username := *argAddFileName
 		password := *argAddFilePass
 		filepath := *argAddFilePath
+		remoteTarget := *argAddFileTarget
+		if len(remoteTarget) < 1 {
+			remoteTarget = filepath
+		}
 		authToken, err := runUserAuthenticate(target, username, password)
 		if err != nil {
 			log.Fatalf("Failed to authenticate to the server %s: %v", target, err)
@@ -127,7 +133,7 @@ func main() {
 			log.Fatalf("Failed to calculate the required data for the file %s: %v", filepath, err)
 		}
 
-		fileID, err := runAddFile(target, authToken, filepath, data.LastMod, data.ChunkCount, data.Hash)
+		fileID, err := runAddFile(target, authToken, filepath, remoteTarget, data.LastMod, data.ChunkCount, data.Hash)
 		if err != nil {
 			log.Fatalf("Failed to register the file on the server %s: %v", target, err)
 		}
@@ -155,13 +161,16 @@ func main() {
 		username := *argSyncName
 		password := *argSyncPass
 		filepath := *argSyncPath
-
+		remoteFilepath := *argSyncTarget
+		if len(remoteFilepath) < 1 {
+			remoteFilepath = filepath
+		}
 		authToken, err := runUserAuthenticate(target, username, password)
 		if err != nil {
 			log.Fatalf("Failed to authenticate to the server %s: %v", target, err)
 		}
 
-		_, _, err = runSyncFile(target, authToken, filepath)
+		_, _, err = runSyncFile(target, authToken, filepath, remoteFilepath)
 		if err != nil {
 			log.Fatalf("Failed to synchronize the path %s: %v", filepath, err)
 		}

@@ -48,7 +48,7 @@ type FilePutResponse struct {
 	FileID int
 }
 
-// FilePutResponse is the JSON serializable request object sent to the
+// FilePutRequest is the JSON serializable request object sent to the
 // /api/files PUT handlder.
 type FilePutRequest struct {
 	FileName   string
