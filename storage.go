@@ -47,7 +47,7 @@ const (
 	lookupUserByName = `SELECT Name FROM Users WHERE Name = ?;`
 	addUser          = `INSERT INTO Users (Name, Salt, Password) VALUES (?, ?, ?);`
 	getUser          = `SELECT UserID, Salt, Password FROM Users  WHERE Name = ?;`
-	updateUser       = `UPDATE Users SET Salt = ?, Password = ? WHERE UserID = ?;`
+	updateUser       = `UPDATE Users SET Name = ?, Salt = ?, Password = ? WHERE UserID = ?;`
 
 	setUserStats    = `INSERT OR REPLACE INTO UserStats (UserID, Quota, Allocated, Revision) VALUES (?, ?, ?, ?);`
 	getUserStats    = `SELECT Quota, Allocated, Revision FROM UserStats WHERE UserID = ?;`
@@ -253,8 +253,8 @@ func (s *Storage) GetUser(username string) (*User, error) {
 
 // UpdateUser changes the salt, saltedHash and quota for a given userID. This will fail
 // if the userID doesn't exist.
-func (s *Storage) UpdateUser(userID int, salt string, saltedHash []byte, quota int) error {
-	res, err := s.db.Exec(updateUser, salt, saltedHash, userID)
+func (s *Storage) UpdateUser(userID int, name string, salt string, saltedHash []byte, quota int) error {
+	res, err := s.db.Exec(updateUser, name, salt, saltedHash, userID)
 	if err != nil {
 		return fmt.Errorf("failed to update the user (%d): %v", userID, err)
 	}

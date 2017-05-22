@@ -35,10 +35,11 @@ var (
 	argAddUserPass  = cmdAddUser.Arg("password", "The password for user.").Required().String()
 	argAddUserQuota = cmdAddUser.Arg("quota", "The quota size in bytes.").Default("1000000000").Int()
 
-	cmdModUser      = appFlags.Command("moduser", "Modifies a user in storage.")
-	argModUserName  = cmdModUser.Arg("username", "The username for user.").Required().String()
-	argModUserPass  = cmdModUser.Arg("password", "The password for user.").Required().String()
-	argModUserQuota = cmdModUser.Arg("quota", "The quota size in bytes.").Default("1000000000").Int()
+	cmdModUser         = appFlags.Command("moduser", "Modifies a user in storage.")
+	argModUserName     = cmdModUser.Arg("username", "The username for existing user.").Required().String()
+	argModUserNewQuota = cmdModUser.Flag("quota", "New quota size in bytes.").Short('q').Int()
+	argModUserNewName  = cmdModUser.Flag("user", "New quota size in bytes.").Short('u').String()
+	argModUserNewPass  = cmdModUser.Flag("pass", "New quota size in bytes.").Short('p').String()
 
 	cmdUserStats     = appFlags.Command("userstats", "Gets the quota, allocation and revision counts for the user.")
 	argUserStatsHost = cmdUserStats.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
@@ -94,14 +95,11 @@ func main() {
 		runAddUser(store, username, password, quota)
 
 	case cmdModUser.FullCommand():
-		username := *argModUserName
-		password := *argModUserPass
-		quota := *argModUserQuota
 		store, err := openStorage()
 		if err != nil {
 			log.Fatalf("Failed to open the storage database: %v", err)
 		}
-		runModUser(store, username, password, quota)
+		runModUser(store, *argModUserName, *argModUserNewQuota, *argModUserNewName, *argModUserNewPass)
 
 	case cmdGetFiles.FullCommand():
 		target := *argGetFilesHost

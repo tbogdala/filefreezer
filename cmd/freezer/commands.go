@@ -62,22 +62,40 @@ func runAddUser(store *filefreezer.Storage, username string, password string, qu
 	return user
 }
 
-// runModUser modifies a user in the database
-func runModUser(store *filefreezer.Storage, username string, password string, quota int) {
+// runModUser modifies a user in the database. if the newQuota, newUsername or newPassword
+// fields are non-nil then their values are updated in the database.
+func runModUser(store *filefreezer.Storage, username string, newQuota int, newUsername string, newPassword string) {
 	// get existing user
 	user, err := store.GetUser(username)
 	if err != nil {
 		log.Fatalf("Failed to get an existing user with the name %s: %v", username, err)
 	}
-
-	// generate the salt and salted password hash
-	salt, saltedPass, err := filefreezer.GenSaltedHash(password)
+	stats, err := store.GetUserStats(user.ID)
 	if err != nil {
-		log.Fatalf("Failed to generate a password hash %v", err)
+		log.Fatalf("Failed to get an existing user stats with the name %s: %v", username, err)
 	}
 
-	// add the user to the database
-	err = store.UpdateUser(user.ID, salt, saltedPass, quota)
+	updatedName := user.Name
+	if newUsername != "" {
+		updatedName = newUsername
+	}
+
+	updatedSalt := user.Salt
+	updatedSaltedHash := user.SaltedHash
+	if newPassword != "" {
+		updatedSalt, updatedSaltedHash, err = filefreezer.GenSaltedHash(newPassword)
+		if err != nil {
+			log.Fatalf("Failed to generate a password hash %v", err)
+		}
+	}
+
+	updatedQuota := stats.Quota
+	if newQuota > 0 {
+		updatedQuota = newQuota
+	}
+
+	// update the user in the database
+	err = store.UpdateUser(user.ID, updatedName, updatedSalt, updatedSaltedHash, updatedQuota)
 	if err != nil {
 		log.Fatalf("Failed to modify the user %s: %v", username, err)
 	}

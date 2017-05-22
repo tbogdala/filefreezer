@@ -150,11 +150,11 @@ func TestBasicDBCreation(t *testing.T) {
 	setupTestUser(store, "admin2", "hamster2", t)
 
 	// test to make sure we can update a user password, hash and quota
-	user3, err := store.AddUser("admin3", "1234", []byte{1, 2, 3, 4}, 1e9)
+	user3, err := store.AddUser("admin4", "1234", []byte{1, 2, 3, 4}, 1e9)
 	if err != nil {
 		t.Fatalf("Failed to create the admin3 test user: %v", err)
 	}
-	err = store.UpdateUser(user3.ID, "5678", []byte{5, 6, 7, 8}, 10)
+	err = store.UpdateUser(user3.ID, "admin3", "5678", []byte{5, 6, 7, 8}, 10)
 	if err != nil {
 		t.Fatalf("Failed to update the user password and quota data: %v", err)
 	}

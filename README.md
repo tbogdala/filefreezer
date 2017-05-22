@@ -72,6 +72,12 @@ TODO / Notes
 * Server could return capabilities in json response to login that
   could have things like MaxChunkSize for the client to use.
 
+* Currently the client needs to know the chunk size to use
+  so that it can calculate compatible hashes, so this must end up
+  getting sent by the server as the authoritative source.
+
+* When removing a user, any files and chunks owned by the user should
+  also be removed.
 
 
 Workflows
