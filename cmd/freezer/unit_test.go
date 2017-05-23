@@ -24,20 +24,20 @@ import (
 )
 
 const (
+	useHTTPS       = false
 	testServerAddr = ":8080"
-	testHost       = "https://127.0.0.1:8080"
 	testDataDir    = "testdata"
 	testFilename1  = "testdata/unit_test_1.dat"
 	testFilename2  = "testdata/unit_test_2.dat"
 )
 
 var (
-	state *models.State
-	AppFs afero.Fs = afero.NewOsFs()
+	state    *models.State
+	testHost string
+	AppFs    = afero.NewOsFs()
 )
 
-// TODO: make a test upload a file exactly 2xChunkSize and then sync it
-
+// generates a non-crypto strength random byte array of specified length
 func genRandomBytes(length int) []byte {
 	b := make([]byte, length)
 	for i := 0; i < length; i++ {
@@ -49,18 +49,34 @@ func genRandomBytes(length int) []byte {
 	return b
 }
 
+// set the flags up to use the certificates used for testing via https and TLS
+func setupHTTPSTestFlags() {
+	*flagTLSKey = "freezer.key"
+	*flagTLSCrt = "freezer.crt"
+	testHost = "https://127.0.0.1:8080"
+}
+
+// set the flags up to use plain http
+func setupHTTPTestFlags() {
+	*flagTLSKey = ""
+	*flagTLSCrt = ""
+	testHost = "http://127.0.0.1:8080"
+}
+
 func TestMain(m *testing.M) {
 	// instead of using command line flags for the unit test, we'll just
 	// override the flag values right here
 	*flagDatabasePath = "file::memory:?mode=memory&cache=shared"
-	//*flagDatabasePath = "file:unit_test.db"
-	*flagPublicKeyPath = "freezer.rsa.pub"
-	*flagPrivateKeyPath = "freezer.rsa"
-	*flagTLSKey = "freezer.key"
-	*flagTLSCrt = "freezer.crt"
 	*flagChunkSize = 1024 * 1024 * 4
 	*flagExtraStrict = true
 	*argListenAddr = testServerAddr
+	*flagPublicKeyPath = "freezer.rsa.pub"
+	*flagPrivateKeyPath = "freezer.rsa"
+	if useHTTPS {
+		setupHTTPSTestFlags()
+	} else {
+		setupHTTPTestFlags()
+	}
 
 	// make sure the test data folder exists
 	os.Mkdir(testDataDir, os.ModeDir|os.ModePerm)

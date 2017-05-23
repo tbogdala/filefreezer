@@ -23,8 +23,8 @@ var (
 	flagDatabasePath   = appFlags.Flag("db", "The database path.").Default("file:freezer.db").String()
 	flagPublicKeyPath  = appFlags.Flag("pub", "The file path to the public key.").Default("freezer.rsa.pub").String()
 	flagPrivateKeyPath = appFlags.Flag("priv", "The file path to the private key.").Default("freezer.rsa").String()
-	flagTLSKey         = appFlags.Flag("tlskey", "The HTTPS TLS private key file.").Default("freezer.key").String()
-	flagTLSCrt         = appFlags.Flag("tlscert", "The HTTPS TLS public crt file.").Default("freezer.crt").String()
+	flagTLSKey         = appFlags.Flag("tlskey", "The HTTPS TLS private key file.").String()
+	flagTLSCrt         = appFlags.Flag("tlscert", "The HTTPS TLS public crt file.").String()
 	flagChunkSize      = appFlags.Flag("cs", "The number of bytes contained in one chunk.").Default("4194304").Int64() // 4 MB
 	flagExtraStrict    = appFlags.Flag("xs", "File checking should be extra strict on file sync comparisons.").Default("true").Bool()
 
@@ -261,15 +261,19 @@ func newState() (*models.State, error) {
 
 	// load the private key
 	var err error
-	s.SignKey, err = ioutil.ReadFile(s.PrivateKeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to read the private key (%s). %v", s.PrivateKeyPath, err)
+	if s.PrivateKeyPath != "" {
+		s.SignKey, err = ioutil.ReadFile(s.PrivateKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to read the private key (%s). %v", s.PrivateKeyPath, err)
+		}
 	}
 
 	// load the public key
-	s.VerifyKey, err = ioutil.ReadFile(s.PublicKeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to read the public key (%s). %v", s.PublicKeyPath, err)
+	if s.PublicKeyPath != "" {
+		s.VerifyKey, err = ioutil.ReadFile(s.PublicKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to read the public key (%s). %v", s.PublicKeyPath, err)
+		}
 	}
 
 	// attempt to open the storage database
