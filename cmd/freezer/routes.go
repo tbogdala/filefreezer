@@ -54,12 +54,6 @@ func InitRoutes(state *models.State) *mux.Router {
 	return r
 }
 
-// UserLoginResponse is the JSON serializable response given by the
-// /api/users/login POST handlder.
-type UserLoginResponse struct {
-	Token string
-}
-
 // handleUsersLogin handles the incoming POST /api/users/login
 func handleUsersLogin(state *models.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +86,9 @@ func handleUsersLogin(state *models.State) http.HandlerFunc {
 			return
 		}
 
-		writeJSONResponse(w, &UserLoginResponse{token})
+		writeJSONResponse(w, &models.UserLoginResponse{
+			Token: token,
+		})
 	}
 }
 

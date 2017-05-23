@@ -5,6 +5,12 @@ package models
 
 import "github.com/tbogdala/filefreezer"
 
+// UserLoginResponse is the JSON serializable response given by the
+// /api/users/login POST handlder.
+type UserLoginResponse struct {
+	Token string
+}
+
 // UserStatsGetResponse is the JSON serializable response given by the
 // /api/user/stats GET handler.
 type UserStatsGetResponse struct {

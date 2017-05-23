@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/tbogdala/filefreezer"
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
 
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
@@ -71,6 +72,20 @@ var (
 	argSyncPath   = cmdSync.Arg("filepath", "The file to sync with the server.").Required().String()
 	argSyncTarget = cmdSync.Arg("target", "The file path to sync to on the server; defaults to the same as the filename arg.").Default("").String()
 )
+
+// openStorage is the common function used to open the filefreezer Storage
+func openStorage() (*filefreezer.Storage, error) {
+	log.Printf("Opening database: %s\n", *flagDatabasePath)
+
+	// open up the storage database
+	store, err := filefreezer.NewStorage(*flagDatabasePath)
+	if err != nil {
+		return nil, err
+	}
+	store.ChunkSize = *flagChunkSize
+	store.CreateTables()
+	return store, nil
+}
 
 func main() {
 	switch kingpin.MustParse(appFlags.Parse(os.Args[1:])) {
