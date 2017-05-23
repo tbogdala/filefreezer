@@ -11,21 +11,21 @@ import (
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
 )
 
-func runRmFile(hostURI string, token string, filename string) error {
+func (s *commandState) rmFile(filename string) error {
 	var getReq models.FileGetByNameRequest
 	getReq.FileName = filename
 
 	// get the file id for the filename provided
-	target := fmt.Sprintf("%s/api/file/name", hostURI)
-	body, err := runAuthRequest(target, "GET", token, getReq)
+	target := fmt.Sprintf("%s/api/file/name", s.hostURI)
+	body, err := runAuthRequest(target, "GET", s.authToken, getReq)
 	var fi models.FileGetResponse
 	err = json.Unmarshal(body, &fi)
 	if err != nil {
 		return fmt.Errorf("Failed to get the file information for the file name given (%s): %v", filename, err)
 	}
 
-	target = fmt.Sprintf("%s/api/file/%d", hostURI, fi.FileID)
-	body, err = runAuthRequest(target, "DELETE", token, nil)
+	target = fmt.Sprintf("%s/api/file/%d", s.hostURI, fi.FileID)
+	body, err = runAuthRequest(target, "DELETE", s.authToken, nil)
 	if err != nil {
 		return fmt.Errorf("Failed to remove the file %s: %v", filename, err)
 	}
@@ -35,15 +35,15 @@ func runRmFile(hostURI string, token string, filename string) error {
 	return nil
 }
 
-func runAddFile(hostURI string, token string, fileName string, remoteFilepath string, lastMod int64, chunkCount int, fileHash string) (int, error) {
+func (s *commandState) addFile(fileName string, remoteFilepath string, lastMod int64, chunkCount int, fileHash string) (int, error) {
 	var putReq models.FilePutRequest
 	putReq.FileName = remoteFilepath
 	putReq.LastMod = lastMod
 	putReq.ChunkCount = chunkCount
 	putReq.FileHash = fileHash
 
-	target := fmt.Sprintf("%s/api/files", hostURI)
-	body, err := runAuthRequest(target, "POST", token, putReq)
+	target := fmt.Sprintf("%s/api/files", s.hostURI)
+	body, err := runAuthRequest(target, "POST", s.authToken, putReq)
 	if err != nil {
 		return 0, err
 	}
@@ -57,7 +57,7 @@ func runAddFile(hostURI string, token string, fileName string, remoteFilepath st
 	}
 
 	// we've registered the file, so now we should sync it
-	_, _, err = runSyncFile(hostURI, token, fileName, remoteFilepath)
+	_, _, err = s.syncFile(fileName, remoteFilepath)
 
 	return putResp.FileID, err
 }

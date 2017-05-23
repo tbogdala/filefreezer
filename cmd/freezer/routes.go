@@ -17,7 +17,7 @@ import (
 )
 
 // InitRoutes creates the routing multiplexer for the server
-func InitRoutes(state *models.State) *mux.Router {
+func InitRoutes(state *serverState) *mux.Router {
 	// setup the web server routing table
 	r := mux.NewRouter().StrictSlash(false)
 
@@ -55,7 +55,7 @@ func InitRoutes(state *models.State) *mux.Router {
 }
 
 // handleUsersLogin handles the incoming POST /api/users/login
-func handleUsersLogin(state *models.State) http.HandlerFunc {
+func handleUsersLogin(state *serverState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// get the user and password from the parameters
 		err := r.ParseForm()
@@ -88,13 +88,16 @@ func handleUsersLogin(state *models.State) http.HandlerFunc {
 
 		writeJSONResponse(w, &models.UserLoginResponse{
 			Token: token,
+			Capabilities: models.ServerCapabilities{
+				ChunkSize: *argServeChunkSize,
+			},
 		})
 	}
 }
 
 // handleGetUserStats returns a JSON object with the authenticated user's current
 // stats susch as the quota, allocated byte count and current revision number.
-func handleGetUserStats(state *models.State) http.HandlerFunc {
+func handleGetUserStats(state *serverState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
@@ -121,7 +124,7 @@ func handleGetUserStats(state *models.State) http.HandlerFunc {
 
 // handleGetAllFiles returns a JSON object with all of the FileInfo objects in Storage
 // that are bound to the user id authorized in the context of the call.
-func handleGetAllFiles(state *models.State) http.HandlerFunc {
+func handleGetAllFiles(state *serverState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
@@ -146,7 +149,7 @@ func handleGetAllFiles(state *models.State) http.HandlerFunc {
 
 // handleGetFileByName returns a JSON object with all of the FileInfo data for the file in Storage
 // as well as a slice of missing chunks, if any.
-func handleGetFileByName(state *models.State) http.HandlerFunc {
+func handleGetFileByName(state *serverState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
@@ -192,7 +195,7 @@ func handleGetFileByName(state *models.State) http.HandlerFunc {
 
 // handleGetFile returns a JSON object with all of the FileInfo data for the file in Storage
 // as well as a slice of missing chunks, if any.
-func handleGetFile(state *models.State) http.HandlerFunc {
+func handleGetFile(state *serverState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
@@ -233,7 +236,7 @@ func handleGetFile(state *models.State) http.HandlerFunc {
 
 // handleGetFile returns a JSON object with all of the FileInfo data for the file in Storage
 // as well as a slice of missing chunks, if any.
-func handlePutFileChunk(state *models.State) http.HandlerFunc {
+func handlePutFileChunk(state *serverState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
@@ -286,7 +289,7 @@ func handlePutFileChunk(state *models.State) http.HandlerFunc {
 
 // handleGetFile returns a JSON object with all of the FileInfo data for the file in Storage
 // as well as a slice of missing chunks, if any.
-func handleGetFileChunks(state *models.State) http.HandlerFunc {
+func handleGetFileChunks(state *serverState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
@@ -317,7 +320,7 @@ func handleGetFileChunks(state *models.State) http.HandlerFunc {
 
 // handleGetFile returns a JSON object with all of the FileInfo data for the file in Storage
 // as well as a slice of missing chunks, if any.
-func handleGetFileChunk(state *models.State) http.HandlerFunc {
+func handleGetFileChunk(state *serverState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
@@ -364,7 +367,7 @@ func handleGetFileChunk(state *models.State) http.HandlerFunc {
 }
 
 // handlePutFile registers a file for a given user.
-func handlePutFile(state *models.State) http.HandlerFunc {
+func handlePutFile(state *serverState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// pull the user credentials
 		ctx := r.Context()
@@ -419,7 +422,7 @@ func handlePutFile(state *models.State) http.HandlerFunc {
 	}
 }
 
-func handleDeleteFile(state *models.State) http.HandlerFunc {
+func handleDeleteFile(state *serverState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// pull the user credentials
 		ctx := r.Context()
@@ -458,7 +461,7 @@ type userCredentialsContext struct {
 // authenticateToken middleware calls out to the auth module to authenticate
 // the token contained in the header of the response to ensure user credentials
 // before calling the next handler.
-func authenticateToken(state *models.State, next http.Handler) http.Handler {
+func authenticateToken(state *serverState, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// validate the token
 		token, err := state.Authorizor.VerifyToken(r)

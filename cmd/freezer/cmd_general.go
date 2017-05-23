@@ -21,13 +21,13 @@ import (
 	"io/ioutil"
 )
 
-// runUserAuthenticate will use a HTTP call to authenticate the user
+// authenticate will use a HTTP call to authenticate the user
 // and return the JWT token string.
-func runUserAuthenticate(hostURI, username, password string) (string, error) {
+func (s *commandState) authenticate(hostURI, username, password string) error {
 	// get the http client to use for the connection
 	client, err := getHTTPClient()
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	// Build and perform the request
@@ -38,29 +38,34 @@ func runUserAuthenticate(hostURI, username, password string) (string, error) {
 	})
 	if err != nil {
 		if resp != nil {
-			return "", fmt.Errorf("Failed to make the HTTP POST request to %s (status: %s): %v", target, resp.Status, err)
+			return fmt.Errorf("Failed to make the HTTP POST request to %s (status: %s): %v", target, resp.Status, err)
 		}
-		return "", fmt.Errorf("Failed to make the HTTP POST request to %s: %v", target, err)
+		return fmt.Errorf("Failed to make the HTTP POST request to %s: %v", target, err)
 	}
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("Failed to read the response body from %s: %v", target, err)
+		return fmt.Errorf("Failed to read the response body from %s: %v", target, err)
 	}
 
 	// check the status code to ensure the success of the call
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Failed to make the HTTP POST request to %s (status: %s): %v", target, resp.Status, string(body))
+		return fmt.Errorf("Failed to make the HTTP POST request to %s (status: %s): %v", target, resp.Status, string(body))
 	}
 
 	// get the response by deserializing the JSON
 	var userLogin models.UserLoginResponse
 	err = json.Unmarshal(body, &userLogin)
 	if err != nil {
-		return "", fmt.Errorf("Poorly formatted response to %s: %v", target, err)
+		return fmt.Errorf("Poorly formatted response to %s: %v", target, err)
 	}
 
-	return userLogin.Token, nil
+	// authentication was successful so update the command state
+	s.hostURI = hostURI
+	s.authToken = userLogin.Token
+	s.serverCapabilities = userLogin.Capabilities
+
+	return nil
 }
 
 // getHttpClient returns a new http Client object set to work with TLS if keys are provided

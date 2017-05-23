@@ -12,9 +12,9 @@ import (
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
 )
 
-// runAddUser adds a user to the database using the username, password and quota provided.
+// addUser adds a user to the database using the username, password and quota provided.
 // The store object will take care of generating the salt and salted password.
-func runAddUser(store *filefreezer.Storage, username string, password string, quota int) *filefreezer.User {
+func (s *commandState) addUser(store *filefreezer.Storage, username string, password string, quota int) *filefreezer.User {
 	// generate the salt and salted password hash
 	salt, saltedPass, err := filefreezer.GenSaltedHash(password)
 	if err != nil {
@@ -31,9 +31,9 @@ func runAddUser(store *filefreezer.Storage, username string, password string, qu
 	return user
 }
 
-// runModUser modifies a user in the database. if the newQuota, newUsername or newPassword
+// modUser modifies a user in the database. if the newQuota, newUsername or newPassword
 // fields are non-nil then their values are updated in the database.
-func runModUser(store *filefreezer.Storage, username string, newQuota int, newUsername string, newPassword string) {
+func (s *commandState) modUser(store *filefreezer.Storage, username string, newQuota int, newUsername string, newPassword string) {
 	// get existing user
 	user, err := store.GetUser(username)
 	if err != nil {
@@ -72,10 +72,10 @@ func runModUser(store *filefreezer.Storage, username string, newQuota int, newUs
 	log.Println("User modified successfully")
 }
 
-func runUserStats(hostURI string, token string) (stats filefreezer.UserStats, e error) {
+func (s *commandState) getUserStats() (stats filefreezer.UserStats, e error) {
 	// get the file id for the filename provided
-	target := fmt.Sprintf("%s/api/user/stats", hostURI)
-	body, err := runAuthRequest(target, "GET", token, nil)
+	target := fmt.Sprintf("%s/api/user/stats", s.hostURI)
+	body, err := runAuthRequest(target, "GET", s.authToken, nil)
 	var r models.UserStatsGetResponse
 	err = json.Unmarshal(body, &r)
 	if err != nil {
@@ -91,9 +91,9 @@ func runUserStats(hostURI string, token string) (stats filefreezer.UserStats, e 
 	return
 }
 
-func runGetAllFileHashes(hostURI, token string) ([]filefreezer.FileInfo, error) {
-	target := fmt.Sprintf("%s/api/files", hostURI)
-	body, err := runAuthRequest(target, "GET", token, nil)
+func (s *commandState) getAllFileHashes() ([]filefreezer.FileInfo, error) {
+	target := fmt.Sprintf("%s/api/files", s.hostURI)
+	body, err := runAuthRequest(target, "GET", s.authToken, nil)
 	if err != nil {
 		return nil, err
 	}

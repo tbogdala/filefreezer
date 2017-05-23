@@ -1,7 +1,7 @@
 // Copyright 2017, Timothy Bogdala <tdb@animal-machine.com>
 // See the LICENSE file for more details.
 
-package models
+package main
 
 import (
 	"net/http"

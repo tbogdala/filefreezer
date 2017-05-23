@@ -32,7 +32,7 @@ const (
 )
 
 var (
-	state    *models.State
+	state    *serverState
 	testHost string
 	AppFs    = afero.NewOsFs()
 )
@@ -67,9 +67,9 @@ func TestMain(m *testing.M) {
 	// instead of using command line flags for the unit test, we'll just
 	// override the flag values right here
 	*flagDatabasePath = "file::memory:?mode=memory&cache=shared"
-	*flagChunkSize = 1024 * 1024 * 4
+	*argServeChunkSize = 1024 * 1024 * 4
 	*flagExtraStrict = true
-	*argListenAddr = testServerAddr
+	*argServeListenAddr = testServerAddr
 	*flagPublicKeyPath = "freezer.rsa.pub"
 	*flagPrivateKeyPath = "freezer.rsa"
 	if useHTTPS {
@@ -83,9 +83,9 @@ func TestMain(m *testing.M) {
 
 	// write out some random files
 	rand.Seed(time.Now().Unix())
-	rando1 := genRandomBytes(int(*flagChunkSize) * 3)
+	rando1 := genRandomBytes(int(*argServeChunkSize) * 3)
 	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
-	rando2 := genRandomBytes(int(*flagChunkSize)*2 + 42)
+	rando2 := genRandomBytes(int(*argServeChunkSize)*2 + 42)
 	ioutil.WriteFile(testFilename2, rando2, os.ModePerm)
 
 	// run a new state in a server
@@ -94,35 +94,39 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		log.Fatalf("Unable to initialize the server: %v", err)
 	}
-	defer closeState(state)
+	defer state.close()
 
 	// this new server will run in a separate goroutine
 	readyCh := make(chan bool)
-	go runServe(state, readyCh)
+	go state.serve(readyCh)
 
 	<-readyCh
 	os.Exit(m.Run())
 }
 
 func TestEverything(t *testing.T) {
+	cmdState := newCommandState()
+
 	// create a test user
 	username := "admin"
 	password := "1234"
 	userQuota := int(1e9)
-	user := runAddUser(state.Storage, username, password, userQuota)
+	user := cmdState.addUser(state.Storage, username, password, userQuota)
 	if user == nil {
 		t.Fatalf("Failed to add the test user (%s) to Storage", username)
 	}
 
 	// attempt to get the authentication token
-	token, err := runUserAuthenticate(testHost, username, password)
+	err := cmdState.authenticate(testHost, username, password)
 	if err != nil {
 		t.Fatalf("Failed to authenticate as the test user: %v", err)
 	}
-	t.Logf("User authenticated ...")
+	if cmdState.serverCapabilities.ChunkSize != *argServeChunkSize {
+		t.Fatalf("Server capabilities returned a different chunk size than configured for the test: %d", *argServeChunkSize)
+	}
 
 	// getting the user stats now should have default quota and otherwise empty settings
-	userStats, err := runUserStats(testHost, token)
+	userStats, err := cmdState.getUserStats()
 	if err != nil {
 		t.Fatalf("Failed to get the user stats: %v", err)
 	}
@@ -134,7 +138,7 @@ func TestEverything(t *testing.T) {
 	}
 
 	// pull all the file infos ... should be empty
-	allFiles, err := runGetAllFileHashes(testHost, token)
+	allFiles, err := cmdState.getAllFileHashes()
 	if err != nil {
 		t.Fatalf("Failed to authenticate as the test user: %v", err)
 	} else if len(allFiles) != 0 {
@@ -144,7 +148,7 @@ func TestEverything(t *testing.T) {
 
 	// the revision should not have changed by only getting the file hashes
 	oldRevision := userStats.Revision
-	userStats, err = runUserStats(testHost, token)
+	userStats, err = cmdState.getUserStats()
 	if err != nil {
 		t.Fatalf("Failed to get the user stats: %v", err)
 	}
@@ -154,13 +158,13 @@ func TestEverything(t *testing.T) {
 
 	// test adding a file
 	filename := testFilename1
-	chunkCount, lastMod, hashString, err := filefreezer.CalcFileHashInfo(state.Storage.ChunkSize, filename)
+	chunkCount, lastMod, hashString, err := filefreezer.CalcFileHashInfo(cmdState.serverCapabilities.ChunkSize, filename)
 	if err != nil {
 		t.Fatalf("Failed to calculate the file hash for %s: %v", filename, err)
 	}
 	t.Logf("Calculated hash data for %s ...", filename)
 
-	fileID, err := runAddFile(testHost, token, filename, filename, lastMod, chunkCount, hashString)
+	fileID, err := cmdState.addFile(filename, filename, lastMod, chunkCount, hashString)
 	if err != nil {
 		t.Fatalf("Failed to at the file %s: %v", filename, err)
 	}
@@ -168,7 +172,7 @@ func TestEverything(t *testing.T) {
 
 	// at this point we should have a different revision
 	oldRevision = userStats.Revision
-	userStats, err = runUserStats(testHost, token)
+	userStats, err = cmdState.getUserStats()
 	if err != nil {
 		t.Fatalf("Failed to get the user stats: %v", err)
 	}
@@ -177,7 +181,7 @@ func TestEverything(t *testing.T) {
 	}
 
 	// now that the file is registered, sync the data
-	syncStatus, ulCount, err := runSyncFile(testHost, token, filename, filename)
+	syncStatus, ulCount, err := cmdState.syncFile(filename, filename)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s to the server: %v", filename, err)
 	}
@@ -191,7 +195,7 @@ func TestEverything(t *testing.T) {
 
 	// at this point we should have the same revision because the file was unchanged
 	oldRevision = userStats.Revision
-	userStats, err = runUserStats(testHost, token)
+	userStats, err = cmdState.getUserStats()
 	if err != nil {
 		t.Fatalf("Failed to get the user stats: %v", err)
 	}
@@ -201,8 +205,8 @@ func TestEverything(t *testing.T) {
 
 	// now we get a chunk list for the file
 	var remoteChunks models.FileChunksGetResponse
-	target := fmt.Sprintf("%s/api/chunk/%d", testHost, fileID)
-	body, err := runAuthRequest(target, "GET", token, nil)
+	target := fmt.Sprintf("%s/api/chunk/%d", cmdState.hostURI, fileID)
+	body, err := runAuthRequest(target, "GET", cmdState.authToken, nil)
 	err = json.Unmarshal(body, &remoteChunks)
 	if err != nil {
 		t.Fatalf("Failed to get the file chunk list for the file name given (%s): %v", filename, err)
@@ -214,7 +218,7 @@ func TestEverything(t *testing.T) {
 
 	// at this point we should have the same revision
 	oldRevision = userStats.Revision
-	userStats, err = runUserStats(testHost, token)
+	userStats, err = cmdState.getUserStats()
 	if err != nil {
 		t.Fatalf("Failed to get the user stats: %v", err)
 	}
@@ -224,11 +228,11 @@ func TestEverything(t *testing.T) {
 
 	// sleep a second then regenerate the file
 	time.Sleep(time.Second)
-	rando1 := genRandomBytes(int(*flagChunkSize * 3))
+	rando1 := genRandomBytes(int(*argServeChunkSize * 3))
 	ioutil.WriteFile(filename, rando1, os.ModePerm)
 
 	// now that the file is regenerated, sync the data
-	syncStatus, ulCount, err = runSyncFile(testHost, token, filename, filename)
+	syncStatus, ulCount, err = cmdState.syncFile(filename, filename)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s to the server: %v", filename, err)
 	}
@@ -242,7 +246,7 @@ func TestEverything(t *testing.T) {
 	// set the old revision count here to test below and make sure that
 	// allocation counts stayed the same since the file synced above is the same size
 	oldAllocation := userStats.Allocated
-	userStats, err = runUserStats(testHost, token)
+	userStats, err = cmdState.getUserStats()
 	if err != nil {
 		t.Fatalf("Failed to get the user stats: %v", err)
 	}
@@ -265,7 +269,7 @@ func TestEverything(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to delete the local test file %s: %v", filename, err)
 	}
-	syncStatus, dlCount, err := runSyncFile(testHost, token, filename, filename)
+	syncStatus, dlCount, err := cmdState.syncFile(filename, filename)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s from the server: %v", filename, err)
 	}
@@ -287,7 +291,7 @@ func TestEverything(t *testing.T) {
 
 	// at this point we should have the same revision
 	oldRevision = userStats.Revision
-	userStats, err = runUserStats(testHost, token)
+	userStats, err = cmdState.getUserStats()
 	if err != nil {
 		t.Fatalf("Failed to get the user stats: %v", err)
 	}
@@ -296,7 +300,7 @@ func TestEverything(t *testing.T) {
 	}
 
 	// generate some new test bytes
-	frankenBytes := genRandomBytes(int(*flagChunkSize) * 3)
+	frankenBytes := genRandomBytes(int(*argServeChunkSize) * 3)
 	err = ioutil.WriteFile(filename, frankenBytes, os.ModePerm)
 	if err != nil {
 		t.Fatalf("Couldn't write original bytes back out to the file %s: %v", filename, err)
@@ -310,7 +314,7 @@ func TestEverything(t *testing.T) {
 	}
 
 	// syncing again should pull a new copy down
-	syncStatus, dlCount, err = runSyncFile(testHost, token, filename, filename)
+	syncStatus, dlCount, err = cmdState.syncFile(filename, filename)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s from the server: %v", filename, err)
 	}
@@ -332,7 +336,7 @@ func TestEverything(t *testing.T) {
 
 	// at this point we should have the same revision
 	oldRevision = userStats.Revision
-	userStats, err = runUserStats(testHost, token)
+	userStats, err = cmdState.getUserStats()
 	if err != nil {
 		t.Fatalf("Failed to get the user stats: %v", err)
 	}
@@ -342,7 +346,7 @@ func TestEverything(t *testing.T) {
 
 	// test syncing a file not registered on the server
 	filename = testFilename2
-	syncStatus, ulCount, err = runSyncFile(testHost, token, filename, filename)
+	syncStatus, ulCount, err = cmdState.syncFile(filename, filename)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s from the server: %v", filename, err)
 	}
@@ -356,7 +360,7 @@ func TestEverything(t *testing.T) {
 	// at this point we should have different allocation and revision
 	oldAllocation = userStats.Allocated
 	oldRevision = userStats.Revision
-	userStats, err = runUserStats(testHost, token)
+	userStats, err = cmdState.getUserStats()
 	if err != nil {
 		t.Fatalf("Failed to get the user stats: %v", err)
 	}
@@ -369,7 +373,7 @@ func TestEverything(t *testing.T) {
 
 	// effectively make a copy of the file by adding a test file under a different target path
 	aliasedFilename := "testFolder/" + filename
-	syncStatus, ulCount, err = runSyncFile(testHost, token, filename, aliasedFilename)
+	syncStatus, ulCount, err = cmdState.syncFile(filename, aliasedFilename)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s from the server: %v", filename, err)
 	}
@@ -383,7 +387,7 @@ func TestEverything(t *testing.T) {
 	// at this point we should have different allocation and revision
 	oldAllocation = userStats.Allocated
 	oldRevision = userStats.Revision
-	userStats, err = runUserStats(testHost, token)
+	userStats, err = cmdState.getUserStats()
 	if err != nil {
 		t.Fatalf("Failed to get the user stats: %v", err)
 	}
@@ -396,7 +400,7 @@ func TestEverything(t *testing.T) {
 	aliasedAllocation := userStats.Allocated - oldAllocation
 
 	// confirm that there's a new file by getting the total list of files
-	allFiles, err = runGetAllFileHashes(testHost, token)
+	allFiles, err = cmdState.getAllFileHashes()
 	if err != nil {
 		t.Fatalf("Failed to get all of the file hashes: %v", err)
 	} else if len(allFiles) != 3 {
@@ -414,13 +418,13 @@ func TestEverything(t *testing.T) {
 	}
 
 	// remove the aliased file and make sure the allocation count decreases by the same amount
-	err = runRmFile(testHost, token, aliasedFilename)
+	err = cmdState.rmFile(aliasedFilename)
 	if err != nil {
 		t.Fatalf("Failed to remove the aliased file from the server: %v", err)
 	}
 	oldAllocation = userStats.Allocated
 	oldRevision = userStats.Revision
-	userStats, err = runUserStats(testHost, token)
+	userStats, err = cmdState.getUserStats()
 	if err != nil {
 		t.Fatalf("Failed to get the user stats: %v", err)
 	}

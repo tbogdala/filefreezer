@@ -5,10 +5,17 @@ package models
 
 import "github.com/tbogdala/filefreezer"
 
+// ServerCapabilities gets returned to the user to describe the features
+// that the server has to the client.
+type ServerCapabilities struct {
+	ChunkSize int64
+}
+
 // UserLoginResponse is the JSON serializable response given by the
 // /api/users/login POST handlder.
 type UserLoginResponse struct {
-	Token string
+	Token        string
+	Capabilities ServerCapabilities
 }
 
 // UserStatsGetResponse is the JSON serializable response given by the

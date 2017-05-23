@@ -12,7 +12,6 @@ import (
 	"os"
 
 	"github.com/tbogdala/filefreezer"
-	"github.com/tbogdala/filefreezer/cmd/freezer/models"
 
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
@@ -25,11 +24,11 @@ var (
 	flagPrivateKeyPath = appFlags.Flag("priv", "The file path to the private key.").Default("freezer.rsa").String()
 	flagTLSKey         = appFlags.Flag("tlskey", "The HTTPS TLS private key file.").String()
 	flagTLSCrt         = appFlags.Flag("tlscert", "The HTTPS TLS public crt file.").String()
-	flagChunkSize      = appFlags.Flag("cs", "The number of bytes contained in one chunk.").Default("4194304").Int64() // 4 MB
 	flagExtraStrict    = appFlags.Flag("xs", "File checking should be extra strict on file sync comparisons.").Default("true").Bool()
 
-	cmdServe      = appFlags.Command("serve", "Adds a new user to the storage.")
-	argListenAddr = cmdServe.Arg("http", "The net address to listen to").Default(":8080").String()
+	cmdServe           = appFlags.Command("serve", "Adds a new user to the storage.")
+	argServeListenAddr = cmdServe.Arg("http", "The net address to listen to").Default(":8080").String()
+	argServeChunkSize  = cmdServe.Flag("cs", "The number of bytes contained in one chunk.").Default("4194304").Int64() // 4 MB
 
 	cmdAddUser      = appFlags.Command("adduser", "Adds a new user to the storage.")
 	argAddUserName  = cmdAddUser.Arg("username", "The username for user.").Required().String()
@@ -82,7 +81,6 @@ func openStorage() (*filefreezer.Storage, error) {
 	if err != nil {
 		return nil, err
 	}
-	store.ChunkSize = *flagChunkSize
 	store.CreateTables()
 	return store, nil
 }
@@ -95,9 +93,9 @@ func main() {
 		if err != nil {
 			log.Fatalf("Unable to initialize the server: %v", err)
 		}
-		defer closeState(state)
-
-		runServe(state, nil)
+		defer state.close()
+		state.Storage.ChunkSize = *argServeChunkSize
+		state.serve(nil)
 
 	case cmdAddUser.FullCommand():
 		username := *argAddUserName
@@ -107,105 +105,95 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to open the storage database: %v", err)
 		}
-		runAddUser(store, username, password, quota)
+		cmdState := newCommandState()
+		cmdState.addUser(store, username, password, quota)
 
 	case cmdModUser.FullCommand():
 		store, err := openStorage()
 		if err != nil {
 			log.Fatalf("Failed to open the storage database: %v", err)
 		}
-		runModUser(store, *argModUserName, *argModUserNewQuota, *argModUserNewName, *argModUserNewPass)
+		cmdState := newCommandState()
+		cmdState.modUser(store, *argModUserName, *argModUserNewQuota, *argModUserNewName, *argModUserNewPass)
 
 	case cmdGetFiles.FullCommand():
-		target := *argGetFilesHost
-		username := *argGetFilesName
-		password := *argGetFilesPass
-		authToken, err := runUserAuthenticate(target, username, password)
+		cmdState := newCommandState()
+		err := cmdState.authenticate(*argGetFilesHost, *argGetFilesName, *argGetFilesPass)
 		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", target, err)
+			log.Fatalf("Failed to authenticate to the server %s: %v", *argGetFilesHost, err)
 		}
-		allFiles, err := runGetAllFileHashes(target, authToken)
+		allFiles, err := cmdState.getAllFileHashes()
 		if err != nil {
-			log.Fatalf("Failed to get all of the files for the user %s from the storage server %s: %v", username, target, err)
+			log.Fatalf("Failed to get all of the files for the user %s from the storage server %s: %v", *argGetFilesName, *argGetFilesHost, err)
 		}
 
 		// TODO: Better formmating
 		log.Printf("All files: %v", allFiles)
 
 	case cmdAddFile.FullCommand():
-		target := *argAddFileHost
-		username := *argAddFileName
-		password := *argAddFilePass
+		cmdState := newCommandState()
+		err := cmdState.authenticate(*argAddFileHost, *argAddFileName, *argAddFilePass)
+		if err != nil {
+			log.Fatalf("Failed to authenticate to the server %s: %v", *argAddFileHost, err)
+		}
+
 		filepath := *argAddFilePath
 		remoteTarget := *argAddFileTarget
 		if len(remoteTarget) < 1 {
 			remoteTarget = filepath
 		}
-		authToken, err := runUserAuthenticate(target, username, password)
-		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", target, err)
-		}
-
-		data, err := calcFileHashInfo(*flagChunkSize, filepath)
+		data, err := calcFileHashInfo(cmdState.serverCapabilities.ChunkSize, filepath)
 		if err != nil {
 			log.Fatalf("Failed to calculate the required data for the file %s: %v", filepath, err)
 		}
 
-		fileID, err := runAddFile(target, authToken, filepath, remoteTarget, data.LastMod, data.ChunkCount, data.Hash)
+		fileID, err := cmdState.addFile(filepath, remoteTarget, data.LastMod, data.ChunkCount, data.Hash)
 		if err != nil {
-			log.Fatalf("Failed to register the file on the server %s: %v", target, err)
+			log.Fatalf("Failed to register the file on the server %s: %v", *argAddFileHost, err)
 		}
 
 		log.Printf("File added (id: %d): %s\n", fileID, filepath)
 
 	case cmdRmFile.FullCommand():
-		target := *argRmFileHost
-		username := *argRmFileName
-		password := *argRmFilePass
-		filepath := *argRmFilePath
-
-		authToken, err := runUserAuthenticate(target, username, password)
+		cmdState := newCommandState()
+		err := cmdState.authenticate(*argRmFileHost, *argRmFileName, *argRmFilePass)
 		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", target, err)
+			log.Fatalf("Failed to authenticate to the server %s: %v", *argAddFileHost, err)
 		}
 
-		err = runRmFile(target, authToken, filepath)
+		filepath := *argRmFilePath
+		err = cmdState.rmFile(filepath)
 		if err != nil {
-			log.Fatalf("Failed to remove file from the server %s: %v", target, err)
+			log.Fatalf("Failed to remove file from the server %s: %v", *argRmFileHost, err)
 		}
 
 	case cmdSync.FullCommand():
-		target := *argSyncHost
-		username := *argSyncName
-		password := *argSyncPass
+		cmdState := newCommandState()
+		err := cmdState.authenticate(*argSyncHost, *argSyncName, *argSyncPass)
+		if err != nil {
+			log.Fatalf("Failed to authenticate to the server %s: %v", *argSyncHost, err)
+		}
+
 		filepath := *argSyncPath
 		remoteFilepath := *argSyncTarget
 		if len(remoteFilepath) < 1 {
 			remoteFilepath = filepath
 		}
-		authToken, err := runUserAuthenticate(target, username, password)
-		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", target, err)
-		}
-
-		_, _, err = runSyncFile(target, authToken, filepath, remoteFilepath)
+		_, _, err = cmdState.syncFile(filepath, remoteFilepath)
 		if err != nil {
 			log.Fatalf("Failed to synchronize the path %s: %v", filepath, err)
 		}
 
 	case cmdUserStats.FullCommand():
-		target := *argUserStatsHost
-		username := *argUserStatsName
-		password := *argUserStatsPass
-
-		authToken, err := runUserAuthenticate(target, username, password)
+		cmdState := newCommandState()
+		err := cmdState.authenticate(*argUserStatsHost, *argUserStatsName, *argUserStatsPass)
 		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", target, err)
+			log.Fatalf("Failed to authenticate to the server %s: %v", *argUserStatsHost, err)
 		}
 
-		_, err = runUserStats(target, authToken)
+		_, err = cmdState.getUserStats()
 		if err != nil {
-			log.Fatalf("Failed to get the user stats from the server %s: %v", target, err)
+			log.Fatalf("Failed to get the user stats from the server %s: %v", *argUserStatsHost, err)
 		}
 
 	}
@@ -245,49 +233,4 @@ func calcFileHashInfo(maxChunkSize int64, filename string) (*fileHashData, error
 	data.Hash = base64.URLEncoding.EncodeToString(hash)
 
 	return data, nil
-}
-
-// closeState will close any state connections used by the server
-func closeState(s *models.State) {
-	s.Storage.Close()
-}
-
-// newState does the setup for the initial state of the server
-func newState() (*models.State, error) {
-	s := new(models.State)
-	s.PrivateKeyPath = *flagPrivateKeyPath
-	s.PublicKeyPath = *flagPublicKeyPath
-	s.DatabasePath = *flagDatabasePath
-
-	// load the private key
-	var err error
-	if s.PrivateKeyPath != "" {
-		s.SignKey, err = ioutil.ReadFile(s.PrivateKeyPath)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to read the private key (%s). %v", s.PrivateKeyPath, err)
-		}
-	}
-
-	// load the public key
-	if s.PublicKeyPath != "" {
-		s.VerifyKey, err = ioutil.ReadFile(s.PublicKeyPath)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to read the public key (%s). %v", s.PublicKeyPath, err)
-		}
-	}
-
-	// attempt to open the storage database
-	s.Storage, err = openStorage()
-	if err != nil {
-		return nil, fmt.Errorf("Failed to open the database using the path specified (%s): %v", s.DatabasePath, err)
-	}
-
-	// assign the token generator
-	s.Authorizor, err = NewJWTAuthenticator(s.Storage, s.SignKey, s.VerifyKey)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to create the JWT token generator: %v", err)
-	}
-
-	log.Printf("Database opened: %s\n", s.DatabasePath)
-	return s, nil
 }
