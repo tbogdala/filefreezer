@@ -435,4 +435,37 @@ func TestEverything(t *testing.T) {
 		t.Fatalf("The allocation count didn't update as expected for the authenticated user: %d", userStats.Allocated)
 	}
 
+	// get a list of existing files for the user before testing the deletion of the user
+	allFiles, err = cmdState.getAllFileHashes()
+	if err != nil {
+		t.Fatalf("Failed to get all of the file hashes for the test user: %v", err)
+	}
+	if len(allFiles) <= 0 {
+		t.Fatalf("No files associated with the user to test with ...") // sanity test of the test
+	}
+
+	// remove the user
+	err = cmdState.rmUser(state.Storage, username)
+	if err != nil {
+		t.Fatalf("Failed to remove the test user: %v", err)
+	}
+
+	// now use some raw API requests to see if we can get chunks, file infos, user stats
+	for _, fileInfo := range allFiles {
+		target := fmt.Sprintf("%s/api/chunk/%d", cmdState.hostURI, fileInfo.FileID)
+		body, err = runAuthRequest(target, "GET", cmdState.authToken, nil)
+		if len(body) > 0 {
+			t.Fatalf("Chunk list obtained for file ID %d that should have been deleted.", fileInfo.FileID)
+		}
+		target = fmt.Sprintf("%s/api/file/%d", cmdState.hostURI, fileInfo.FileID)
+		body, err = runAuthRequest(target, "GET", cmdState.authToken, nil)
+		if len(body) > 0 {
+			t.Fatalf("File information entry obtained for file ID %d that should have been deleted.", fileInfo.FileID)
+		}
+	}
+	target = fmt.Sprintf("%s/api/user/stats", cmdState.hostURI)
+	body, err = runAuthRequest(target, "GET", cmdState.authToken, nil)
+	if len(body) > 0 {
+		t.Fatalf("User stats obtained for the test user that should have been deleted.")
+	}
 }

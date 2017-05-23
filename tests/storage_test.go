@@ -491,6 +491,27 @@ func TestBasicDBCreation(t *testing.T) {
 	if frankenHashString != second.FileHash {
 		t.Fatalf("Hash of reconstructed file doesn't match the original. %s vs %s", frankenHashString, second.FileHash)
 	}
+
+	// make sure we got files still bound to the user
+	allFiles, err := store.GetAllUserFileInfos(user.ID)
+	if err != nil || len(allFiles) < 1 {
+		t.Fatalf("Not enough files left for the user to perform the next test.") // sanity test of the test
+	}
+
+	// attempt to remove the user as a final test
+	err = store.RemoveUser(user.Name)
+	if err != nil {
+		t.Fatalf("Failed to remove the user %s: %v", user.Name, err)
+	}
+
+	// we should now not be able to get user information
+	allFiles, err = store.GetAllUserFileInfos(user.ID)
+	if err != nil {
+		t.Fatalf("Getting file infos for a user that doesn't exist failed with an error: %v", err)
+	}
+	if len(allFiles) > 0 {
+		t.Fatalf("There were files left behind after removing a user.")
+	}
 }
 
 // split the testing process of adding a user into a separate functions so that

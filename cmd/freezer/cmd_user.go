@@ -31,6 +31,18 @@ func (s *commandState) addUser(store *filefreezer.Storage, username string, pass
 	return user
 }
 
+// rmUser removes a user from the database using the username as akey.
+func (s *commandState) rmUser(store *filefreezer.Storage, username string) error {
+	// add the user to the database
+	err := store.RemoveUser(username)
+	if err != nil {
+		log.Fatalf("Failed to remove the user %s: %v", username, err)
+	}
+
+	log.Println("User removed successfully")
+	return nil
+}
+
 // modUser modifies a user in the database. if the newQuota, newUsername or newPassword
 // fields are non-nil then their values are updated in the database.
 func (s *commandState) modUser(store *filefreezer.Storage, username string, newQuota int, newUsername string, newPassword string) {

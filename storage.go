@@ -69,6 +69,11 @@ const (
 	removeFileChunk       = `DELETE FROM FileChunks WHERE FileID = ? AND ChunkNum = ?;`
 	getFileChunk          = `SELECT ChunkHash, Chunk FROM FileChunks WHERE FileID = ? AND ChunkNum = ?;`
 	getFileTotalChunkSize = "SELECT SUM(LENGTH(Chunk)) FROM FileChunks WHERE FileID = ?;"
+
+	removeUser = `DELETE FROM FileChunks WHERE FileID IN (SELECT FileID FROM FileInfo WHERE UserID = ?);
+		DELETE FROM FileInfo WHERE UserID = ?;
+		DELETE FROM UserStats WHERE UserID = ?;
+		DELETE FROM Users WHERE UserID = ?;`
 )
 
 // FileInfo contains the information stored about a given file for a particular user.
@@ -249,6 +254,22 @@ func (s *Storage) GetUser(username string) (*User, error) {
 	}
 
 	return user, nil
+}
+
+// RemoveUser removes user and all files and file chunks associated with the user.
+func (s *Storage) RemoveUser(username string) error {
+	// make sure we have a user to begin with
+	user, err := s.GetUser(username)
+	if err != nil {
+		return fmt.Errorf("Failed to find the user in the database: %v", err)
+	}
+
+	_, err = s.db.Exec(removeUser, user.ID, user.ID, user.ID, user.ID)
+	if err != nil {
+		return fmt.Errorf("failed to remove the user %s (id: %d): %v", user.Name, user.ID, err)
+	}
+
+	return nil
 }
 
 // UpdateUser changes the salt, saltedHash and quota for a given userID. This will fail

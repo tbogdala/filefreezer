@@ -40,16 +40,16 @@ func InitRoutes(state *serverState) *mux.Router {
 	r.Handle("/api/file/name", authenticateToken(state, handleGetFileByName(state))).Methods("GET")
 
 	// deletes a file
-	r.Handle("/api/file/{fileid}", authenticateToken(state, handleDeleteFile(state))).Methods("DELETE")
+	r.Handle("/api/file/{fileid:[0-9]+}", authenticateToken(state, handleDeleteFile(state))).Methods("DELETE")
 
 	// put a file chunk
-	r.Handle("/api/chunk/{fileid}/{chunknumber}/{chunkhash}", authenticateToken(state, handlePutFileChunk(state))).Methods("PUT")
+	r.Handle("/api/chunk/{fileid:[0-9]+}/{chunknumber:[0-9]+}/{chunkhash}", authenticateToken(state, handlePutFileChunk(state))).Methods("PUT")
 
 	// get a file chunk
-	r.Handle("/api/chunk/{fileid}/{chunknumber}", authenticateToken(state, handleGetFileChunk(state))).Methods("GET")
+	r.Handle("/api/chunk/{fileid:[0-9]+}/{chunknumber:[0-9]+}", authenticateToken(state, handleGetFileChunk(state))).Methods("GET")
 
 	// get all known file chunks (except the chunks themselves)
-	r.Handle("/api/chunk/{fileid}", authenticateToken(state, handleGetFileChunks(state))).Methods("GET")
+	r.Handle("/api/chunk/{fileid:[0-9]+}", authenticateToken(state, handleGetFileChunks(state))).Methods("GET")
 
 	return r
 }

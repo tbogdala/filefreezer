@@ -35,6 +35,9 @@ var (
 	argAddUserPass  = cmdAddUser.Arg("password", "The password for user.").Required().String()
 	argAddUserQuota = cmdAddUser.Arg("quota", "The quota size in bytes.").Default("1000000000").Int()
 
+	cmdRmUser     = appFlags.Command("rmuser", "Removes a user from the storage.")
+	argRmUserName = cmdRmUser.Arg("username", "The username for user to remove.").Required().String()
+
 	cmdModUser         = appFlags.Command("moduser", "Modifies a user in storage.")
 	argModUserName     = cmdModUser.Arg("username", "The username for existing user.").Required().String()
 	argModUserNewQuota = cmdModUser.Flag("quota", "New quota size in bytes.").Short('q').Int()
@@ -98,15 +101,20 @@ func main() {
 		state.serve(nil)
 
 	case cmdAddUser.FullCommand():
-		username := *argAddUserName
-		password := *argAddUserPass
-		quota := *argAddUserQuota
 		store, err := openStorage()
 		if err != nil {
 			log.Fatalf("Failed to open the storage database: %v", err)
 		}
 		cmdState := newCommandState()
-		cmdState.addUser(store, username, password, quota)
+		cmdState.addUser(store, *argAddUserName, *argAddUserPass, *argAddUserQuota)
+
+	case cmdRmUser.FullCommand():
+		store, err := openStorage()
+		if err != nil {
+			log.Fatalf("Failed to open the storage database: %v", err)
+		}
+		cmdState := newCommandState()
+		cmdState.rmUser(store, *argRmUserName)
 
 	case cmdModUser.FullCommand():
 		store, err := openStorage()
