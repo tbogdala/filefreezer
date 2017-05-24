@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/sha1"
 	"encoding/base64"
 	"fmt"
@@ -12,6 +13,8 @@ import (
 	"os"
 
 	"github.com/tbogdala/filefreezer"
+
+	"strings"
 
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
@@ -25,52 +28,40 @@ var (
 	flagTLSKey         = appFlags.Flag("tlskey", "The HTTPS TLS private key file.").String()
 	flagTLSCrt         = appFlags.Flag("tlscert", "The HTTPS TLS public crt file.").String()
 	flagExtraStrict    = appFlags.Flag("xs", "File checking should be extra strict on file sync comparisons.").Default("true").Bool()
+	flagUserName       = appFlags.Flag("user", "The username for user.").Short('u').String()
+	flagUserPass       = appFlags.Flag("pass", "The password for user.").Short('p').String()
 
 	cmdServe           = appFlags.Command("serve", "Adds a new user to the storage.")
 	argServeListenAddr = cmdServe.Arg("http", "The net address to listen to").Default(":8080").String()
-	argServeChunkSize  = cmdServe.Flag("cs", "The number of bytes contained in one chunk.").Default("4194304").Int64() // 4 MB
+	flagServeChunkSize = cmdServe.Flag("cs", "The number of bytes contained in one chunk.").Default("4194304").Int64() // 4 MB
 
-	cmdAddUser      = appFlags.Command("adduser", "Adds a new user to the storage.")
-	argAddUserName  = cmdAddUser.Arg("username", "The username for user.").Required().String()
-	argAddUserPass  = cmdAddUser.Arg("password", "The password for user.").Required().String()
-	argAddUserQuota = cmdAddUser.Arg("quota", "The quota size in bytes.").Default("1000000000").Int()
+	cmdAddUser       = appFlags.Command("adduser", "Adds a new user to the storage.")
+	flagAddUserQuota = cmdAddUser.Flag("newquota", "The quota size in bytes.").Short('q').Default("1000000000").Int()
 
-	cmdRmUser     = appFlags.Command("rmuser", "Removes a user from the storage.")
-	argRmUserName = cmdRmUser.Arg("username", "The username for user to remove.").Required().String()
+	cmdRmUser = appFlags.Command("rmuser", "Removes a user from the storage.")
 
-	cmdModUser         = appFlags.Command("moduser", "Modifies a user in storage.")
-	argModUserName     = cmdModUser.Arg("username", "The username for existing user.").Required().String()
-	argModUserNewQuota = cmdModUser.Flag("quota", "New quota size in bytes.").Short('q').Int()
-	argModUserNewName  = cmdModUser.Flag("user", "New quota size in bytes.").Short('u').String()
-	argModUserNewPass  = cmdModUser.Flag("pass", "New quota size in bytes.").Short('p').String()
+	cmdModUser          = appFlags.Command("moduser", "Modifies a user in storage.")
+	flagModUserNewQuota = cmdModUser.Flag("newquota", "New quota size in bytes.").Short('Q').Int()
+	flagModUserNewName  = cmdModUser.Flag("newuser", "New quota size in bytes.").Short('U').String()
+	flagModUserNewPass  = cmdModUser.Flag("newpass", "New quota size in bytes.").Short('P').String()
 
 	cmdUserStats     = appFlags.Command("userstats", "Gets the quota, allocation and revision counts for the user.")
 	argUserStatsHost = cmdUserStats.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
-	argUserStatsName = cmdUserStats.Arg("username", "The username for user.").Required().String()
-	argUserStatsPass = cmdUserStats.Arg("password", "The password for user.").Required().String()
 
 	cmdGetFiles     = appFlags.Command("getfiles", "Gets all files for a user in storage.")
 	argGetFilesHost = cmdGetFiles.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
-	argGetFilesName = cmdGetFiles.Arg("username", "The username for user.").Required().String()
-	argGetFilesPass = cmdGetFiles.Arg("password", "The password for user.").Required().String()
 
 	cmdAddFile       = appFlags.Command("addfile", "Put a file into storage.")
 	argAddFileHost   = cmdAddFile.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
-	argAddFileName   = cmdAddFile.Arg("username", "The username for user.").Required().String()
-	argAddFilePass   = cmdAddFile.Arg("password", "The password for user.").Required().String()
 	argAddFilePath   = cmdAddFile.Arg("filename", "The local file to put on the server.").Required().String()
 	argAddFileTarget = cmdAddFile.Arg("target", "The file path to use on the server for the local file; defaults to the same as the filename arg.").Default("").String()
 
 	cmdRmFile     = appFlags.Command("rmfile", "Remove a file from storage.")
 	argRmFileHost = cmdRmFile.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
-	argRmFileName = cmdRmFile.Arg("username", "The username for user.").Required().String()
-	argRmFilePass = cmdRmFile.Arg("password", "The password for user.").Required().String()
 	argRmFilePath = cmdRmFile.Arg("filename", "The file to remove on the server.").Required().String()
 
 	cmdSync       = appFlags.Command("sync", "Synchronizes a path with the server.")
 	argSyncHost   = cmdSync.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
-	argSyncName   = cmdSync.Arg("username", "The username for user.").Required().String()
-	argSyncPass   = cmdSync.Arg("password", "The password for user.").Required().String()
 	argSyncPath   = cmdSync.Arg("filepath", "The file to sync with the server.").Required().String()
 	argSyncTarget = cmdSync.Arg("target", "The file path to sync to on the server; defaults to the same as the filename arg.").Default("").String()
 )
@@ -88,6 +79,28 @@ func openStorage() (*filefreezer.Storage, error) {
 	return store, nil
 }
 
+func interactiveGetUser() string {
+	if *flagUserName != "" {
+		return *flagUserName
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Username: ")
+	username, _ := reader.ReadString('\n')
+	return strings.TrimSpace(username)
+}
+
+func interactiveGetPassword() string {
+	if *flagUserPass != "" {
+		return *flagUserPass
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Password: ")
+	password, _ := reader.ReadString('\n')
+	return strings.TrimSpace(password)
+}
+
 func main() {
 	switch kingpin.MustParse(appFlags.Parse(os.Args[1:])) {
 	case cmdServe.FullCommand():
@@ -97,7 +110,7 @@ func main() {
 			log.Fatalf("Unable to initialize the server: %v", err)
 		}
 		defer state.close()
-		state.Storage.ChunkSize = *argServeChunkSize
+		state.Storage.ChunkSize = *flagServeChunkSize
 		state.serve(nil)
 
 	case cmdAddUser.FullCommand():
@@ -106,7 +119,9 @@ func main() {
 			log.Fatalf("Failed to open the storage database: %v", err)
 		}
 		cmdState := newCommandState()
-		cmdState.addUser(store, *argAddUserName, *argAddUserPass, *argAddUserQuota)
+		username := interactiveGetUser()
+		password := interactiveGetPassword()
+		cmdState.addUser(store, username, password, *flagAddUserQuota)
 
 	case cmdRmUser.FullCommand():
 		store, err := openStorage()
@@ -114,7 +129,8 @@ func main() {
 			log.Fatalf("Failed to open the storage database: %v", err)
 		}
 		cmdState := newCommandState()
-		cmdState.rmUser(store, *argRmUserName)
+		username := interactiveGetUser()
+		cmdState.rmUser(store, username)
 
 	case cmdModUser.FullCommand():
 		store, err := openStorage()
@@ -122,17 +138,21 @@ func main() {
 			log.Fatalf("Failed to open the storage database: %v", err)
 		}
 		cmdState := newCommandState()
-		cmdState.modUser(store, *argModUserName, *argModUserNewQuota, *argModUserNewName, *argModUserNewPass)
+		username := interactiveGetUser()
+		cmdState.modUser(store, username, *flagModUserNewQuota, *flagModUserNewName, *flagModUserNewPass)
 
 	case cmdGetFiles.FullCommand():
 		cmdState := newCommandState()
-		err := cmdState.authenticate(*argGetFilesHost, *argGetFilesName, *argGetFilesPass)
+		username := interactiveGetUser()
+		password := interactiveGetPassword()
+
+		err := cmdState.authenticate(*argGetFilesHost, username, password)
 		if err != nil {
 			log.Fatalf("Failed to authenticate to the server %s: %v", *argGetFilesHost, err)
 		}
 		allFiles, err := cmdState.getAllFileHashes()
 		if err != nil {
-			log.Fatalf("Failed to get all of the files for the user %s from the storage server %s: %v", *argGetFilesName, *argGetFilesHost, err)
+			log.Fatalf("Failed to get all of the files for the user %s from the storage server %s: %v", username, *argGetFilesHost, err)
 		}
 
 		// TODO: Better formmating
@@ -140,7 +160,9 @@ func main() {
 
 	case cmdAddFile.FullCommand():
 		cmdState := newCommandState()
-		err := cmdState.authenticate(*argAddFileHost, *argAddFileName, *argAddFilePass)
+		username := interactiveGetUser()
+		password := interactiveGetPassword()
+		err := cmdState.authenticate(*argAddFileHost, username, password)
 		if err != nil {
 			log.Fatalf("Failed to authenticate to the server %s: %v", *argAddFileHost, err)
 		}
@@ -164,7 +186,9 @@ func main() {
 
 	case cmdRmFile.FullCommand():
 		cmdState := newCommandState()
-		err := cmdState.authenticate(*argRmFileHost, *argRmFileName, *argRmFilePass)
+		username := interactiveGetUser()
+		password := interactiveGetPassword()
+		err := cmdState.authenticate(*argRmFileHost, username, password)
 		if err != nil {
 			log.Fatalf("Failed to authenticate to the server %s: %v", *argAddFileHost, err)
 		}
@@ -177,7 +201,9 @@ func main() {
 
 	case cmdSync.FullCommand():
 		cmdState := newCommandState()
-		err := cmdState.authenticate(*argSyncHost, *argSyncName, *argSyncPass)
+		username := interactiveGetUser()
+		password := interactiveGetPassword()
+		err := cmdState.authenticate(*argSyncHost, username, password)
 		if err != nil {
 			log.Fatalf("Failed to authenticate to the server %s: %v", *argSyncHost, err)
 		}
@@ -194,7 +220,9 @@ func main() {
 
 	case cmdUserStats.FullCommand():
 		cmdState := newCommandState()
-		err := cmdState.authenticate(*argUserStatsHost, *argUserStatsName, *argUserStatsPass)
+		username := interactiveGetUser()
+		password := interactiveGetPassword()
+		err := cmdState.authenticate(*argUserStatsHost, username, password)
 		if err != nil {
 			log.Fatalf("Failed to authenticate to the server %s: %v", *argUserStatsHost, err)
 		}

@@ -89,7 +89,7 @@ func handleUsersLogin(state *serverState) http.HandlerFunc {
 		writeJSONResponse(w, &models.UserLoginResponse{
 			Token: token,
 			Capabilities: models.ServerCapabilities{
-				ChunkSize: *argServeChunkSize,
+				ChunkSize: *flagServeChunkSize,
 			},
 		})
 	}

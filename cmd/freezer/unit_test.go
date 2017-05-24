@@ -67,7 +67,7 @@ func TestMain(m *testing.M) {
 	// instead of using command line flags for the unit test, we'll just
 	// override the flag values right here
 	*flagDatabasePath = "file::memory:?mode=memory&cache=shared"
-	*argServeChunkSize = 1024 * 1024 * 4
+	*flagServeChunkSize = 1024 * 1024 * 4
 	*flagExtraStrict = true
 	*argServeListenAddr = testServerAddr
 	*flagPublicKeyPath = "freezer.rsa.pub"
@@ -83,9 +83,9 @@ func TestMain(m *testing.M) {
 
 	// write out some random files
 	rand.Seed(time.Now().Unix())
-	rando1 := genRandomBytes(int(*argServeChunkSize) * 3)
+	rando1 := genRandomBytes(int(*flagServeChunkSize) * 3)
 	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
-	rando2 := genRandomBytes(int(*argServeChunkSize)*2 + 42)
+	rando2 := genRandomBytes(int(*flagServeChunkSize)*2 + 42)
 	ioutil.WriteFile(testFilename2, rando2, os.ModePerm)
 
 	// run a new state in a server
@@ -121,8 +121,8 @@ func TestEverything(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to authenticate as the test user: %v", err)
 	}
-	if cmdState.serverCapabilities.ChunkSize != *argServeChunkSize {
-		t.Fatalf("Server capabilities returned a different chunk size than configured for the test: %d", *argServeChunkSize)
+	if cmdState.serverCapabilities.ChunkSize != *flagServeChunkSize {
+		t.Fatalf("Server capabilities returned a different chunk size than configured for the test: %d", *flagServeChunkSize)
 	}
 
 	// getting the user stats now should have default quota and otherwise empty settings
@@ -228,7 +228,7 @@ func TestEverything(t *testing.T) {
 
 	// sleep a second then regenerate the file
 	time.Sleep(time.Second)
-	rando1 := genRandomBytes(int(*argServeChunkSize * 3))
+	rando1 := genRandomBytes(int(*flagServeChunkSize * 3))
 	ioutil.WriteFile(filename, rando1, os.ModePerm)
 
 	// now that the file is regenerated, sync the data
@@ -300,7 +300,7 @@ func TestEverything(t *testing.T) {
 	}
 
 	// generate some new test bytes
-	frankenBytes := genRandomBytes(int(*argServeChunkSize) * 3)
+	frankenBytes := genRandomBytes(int(*flagServeChunkSize) * 3)
 	err = ioutil.WriteFile(filename, frankenBytes, os.ModePerm)
 	if err != nil {
 		t.Fatalf("Couldn't write original bytes back out to the file %s: %v", filename, err)
