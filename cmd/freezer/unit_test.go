@@ -27,8 +27,10 @@ const (
 	useHTTPS       = false
 	testServerAddr = ":8080"
 	testDataDir    = "testdata"
+	testDataDir2   = "testdata/subdir"
 	testFilename1  = "testdata/unit_test_1.dat"
 	testFilename2  = "testdata/unit_test_2.dat"
+	testFilename3  = "testdata/subdir/unit_test_3.dat"
 )
 
 var (
@@ -79,7 +81,7 @@ func TestMain(m *testing.M) {
 	}
 
 	// make sure the test data folder exists
-	os.Mkdir(testDataDir, os.ModeDir|os.ModePerm)
+	os.MkdirAll(testDataDir2, os.ModeDir|os.ModePerm)
 
 	// write out some random files
 	rand.Seed(time.Now().Unix())
@@ -87,6 +89,8 @@ func TestMain(m *testing.M) {
 	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
 	rando2 := genRandomBytes(int(*flagServeChunkSize)*2 + 42)
 	ioutil.WriteFile(testFilename2, rando2, os.ModePerm)
+	rando3 := genRandomBytes(int(*flagServeChunkSize) * 4)
+	ioutil.WriteFile(testFilename3, rando3, os.ModePerm)
 
 	// run a new state in a server
 	var err error
@@ -468,4 +472,83 @@ func TestEverything(t *testing.T) {
 	if len(body) > 0 {
 		t.Fatalf("User stats obtained for the test user that should have been deleted.")
 	}
+
+	// add the user back into the server
+	username = "admin"
+	password = "1234"
+	userQuota = int(1e9)
+	user = cmdState.addUser(state.Storage, username, password, userQuota)
+	if user == nil {
+		t.Fatalf("Failed to add the test user (%s) to Storage", username)
+	}
+
+	// attempt to get the authentication token
+	err = cmdState.authenticate(testHost, username, password)
+	if err != nil {
+		t.Fatalf("Failed to authenticate as the test user: %v", err)
+	}
+
+	// wipe out the files that are in storage to start the syncdir operation with a clean state
+	err = removeAllFilesFromStorage(cmdState)
+	if err != nil {
+		t.Fatalf("Couldn't remove all of the files from storage: %v", err)
+	}
+
+	// run a sync across the whole testdir directory
+	syncdirCount, err := cmdState.syncDirectory(testDataDir, testDataDir)
+	if err != nil {
+		t.Fatalf("Failed to run the syncdir command for the testdata directory: %v", err)
+	}
+	if syncdirCount != 10 {
+		t.Fatalf("Expected to upload 10 chunks worth of data, but only uploaded %d.", syncdirCount)
+	}
+
+	// wipe out the files that are in storage to start the syncdir operation with a clean state
+	err = removeAllFilesFromStorage(cmdState)
+	if err != nil {
+		t.Fatalf("Couldn't remove all of the files from storage: %v", err)
+	}
+
+	// run a sync across the whole testdir directory and specify a diffferent root remote folder
+	syncdirCount, err = cmdState.syncDirectory(testDataDir, "/master/"+testDataDir)
+	if err != nil {
+		t.Fatalf("Failed to run the syncdir command for the testdata directory: %v", err)
+	}
+	if syncdirCount != 10 {
+		t.Fatalf("Expected to upload 10 chunks worth of data, but only uploaded %d.", syncdirCount)
+	}
+
+	// remove a local copy of a file
+	err = os.Remove(testFilename1)
+	if err != nil {
+		t.Fatalf("Failed to remove the test file before attempting to sync: %v", err)
+	}
+
+	// run a sync again to download the file.
+	syncdirCount, err = cmdState.syncDirectory(testDataDir, "/master/"+testDataDir)
+	if err != nil {
+		t.Fatalf("Failed to run the syncdir command for the testdata directory: %v", err)
+	}
+	if syncdirCount != 3 {
+		t.Fatalf("Expected to upload 3 chunks worth of data, but only uploaded %d.", syncdirCount)
+	}
+
+}
+
+func removeAllFilesFromStorage(cmdState *commandState) error {
+	// get all of the remote file names
+	allRemoteFiles, err := cmdState.getAllFileHashes()
+	if err != nil {
+		return fmt.Errorf("Failed to get all of the remote files to remove: %v", err)
+	}
+
+	// for each remote file, execute a remove function
+	for _, fileHash := range allRemoteFiles {
+		err = cmdState.rmFile(fileHash.FileName)
+		if err != nil {
+			return fmt.Errorf("Failed to remove the remote files %s: %v", fileHash.FileName, err)
+		}
+	}
+
+	return nil
 }

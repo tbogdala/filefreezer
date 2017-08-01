@@ -47,8 +47,39 @@ mv key.pem ../freezer.key
 In production, you'll want to use your own valid certificate public and private keys.
 
 
+Quick Start (work in progress)
+------------------------------
+
+Start up a server in a terminal for a database called `freezer.db`:
+
+```bash
+cd cmd/freezer
+go build
+./freezer adduser -u=admin -p=1234
+./freezer serve "127.0.0.1:8080"
+```
+
+With the server running you can now execute commands, such as:
+
+```bash
+./freezer -u=admin -p=1234 userstats http://127.0.0.1:8080
+./freezer -u=admin -p=1234 getfiles http://127.0.0.1:8080
+./freezer -u=admin -p=1234 sync http://127.0.0.1:8080 .bashrc /backupcfg
+./freezer -u=admin -p=1234 syncdir http://127.0.0.1:8080 ~/Downloads /data
+```
+
+Known Bugs and Limitations
+--------------------------
+
+* File permissions are not saved. Neither are directory permissions. All
+  directories created by a `syncdir` operation get created with 0777 permission.
+
+* Empty directories do not get synced.
+
+
 TODO / Notes
 ------------
+
 
 * Inspired from a blog post about Dropbox:
   https://blogs.dropbox.com/tech/2014/07/streaming-file-synchronization/
@@ -71,10 +102,6 @@ TODO / Notes
 * work on readability of error messages wrt bubbling up error objects
 * Server could return capabilities in json response to login that
   could have things like MaxChunkSize for the client to use.
-
-* Currently the client needs to know the chunk size to use
-  so that it can calculate compatible hashes, so this must end up
-  getting sent by the server as the authoritative source.
 
 * When removing a user, any files and chunks owned by the user should
   also be removed.

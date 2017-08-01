@@ -64,6 +64,11 @@ var (
 	argSyncHost   = cmdSync.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
 	argSyncPath   = cmdSync.Arg("filepath", "The file to sync with the server.").Required().String()
 	argSyncTarget = cmdSync.Arg("target", "The file path to sync to on the server; defaults to the same as the filename arg.").Default("").String()
+
+	cmdSyncDir       = appFlags.Command("syncdir", "Synchronizes a directory with the server.")
+	argSyncDirHost   = cmdSyncDir.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
+	argSyncDirPath   = cmdSyncDir.Arg("dirpath", "The directory to sync with the server.").Required().String()
+	argSyncDirTarget = cmdSyncDir.Arg("target", "The directory path to sync to on the server; defaults to the same as the filename arg.").Default("").String()
 )
 
 // openStorage is the common function used to open the filefreezer Storage
@@ -216,6 +221,25 @@ func main() {
 		_, _, err = cmdState.syncFile(filepath, remoteFilepath)
 		if err != nil {
 			log.Fatalf("Failed to synchronize the path %s: %v", filepath, err)
+		}
+
+	case cmdSyncDir.FullCommand():
+		cmdState := newCommandState()
+		username := interactiveGetUser()
+		password := interactiveGetPassword()
+		err := cmdState.authenticate(*argSyncDirHost, username, password)
+		if err != nil {
+			log.Fatalf("Failed to authenticate to the server %s: %v", *argSyncDirHost, err)
+		}
+
+		filepath := *argSyncDirPath
+		remoteFilepath := *argSyncDirTarget
+		if len(remoteFilepath) < 1 {
+			remoteFilepath = filepath
+		}
+		_, err = cmdState.syncDirectory(filepath, remoteFilepath)
+		if err != nil {
+			log.Fatalf("Failed to synchronize the directory %s: %v", filepath, err)
 		}
 
 	case cmdUserStats.FullCommand():

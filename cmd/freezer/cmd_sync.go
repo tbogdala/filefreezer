@@ -4,11 +4,11 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"strings"
@@ -23,6 +23,111 @@ const (
 	syncStatusRemoteNewer = 3
 	syncStatusSame        = 4
 )
+
+func (s *commandState) syncDirectory(localDir string, remoteDir string) (changeCount int, e error) {
+	changeCount = 0
+
+	// make a map of filenames that have been processed locally so that the
+	// loop that processes remote files can skip local files that have already
+	// been sync'd.
+	alreadyProccessed := make(map[string]bool)
+
+	// get all of the remote files
+	remoteFileHashes, err := s.getAllFileHashes()
+	if err != nil {
+		return 0, fmt.Errorf("Failed to a list of remote file hashes: %v", err)
+	}
+	var processDir func(localDir string, remoteDir string) (changeCount int, e error)
+	processDir = func(localDir string, remoteDir string) (changeCount int, e error) {
+		// silently return if the directory does not exist
+		if _, err := os.Stat(localDir); os.IsNotExist(err) {
+			return 0, nil
+		}
+
+		// get all of the local files
+		localFileInfos, err := ioutil.ReadDir(localDir)
+		if err != nil {
+			return 0, fmt.Errorf("Failed to a list of local file names: %v", err)
+		}
+
+		// sync all of the local files
+		var localFileInfo os.FileInfo
+		for _, localFileInfo = range localFileInfos {
+			localFileName := localDir + "/" + localFileInfo.Name()
+			remoteFileName := remoteDir + "/" + localFileInfo.Name()
+
+			// process directories by recursively looking into them for local files
+			// and other directories.
+			if localFileInfo.IsDir() {
+				changes, err := processDir(localFileName, remoteFileName)
+				if err != nil {
+					return changes, err
+				}
+				changeCount += changes
+				continue
+			}
+
+			// attempt the local file sync operation
+			_, changes, err := s.syncFile(localFileName, remoteFileName)
+			if err != nil {
+				return changeCount, fmt.Errorf("Failed to sync local file (%s) with the remote file (%s): %v", localFileName, remoteFileName, err)
+			}
+
+			// on success, keep processing and update the change count
+			changeCount += changes
+			alreadyProccessed[localFileName] = true
+		}
+
+		return changeCount, nil
+	}
+
+	// start recursively processing at the local directory specified
+	changeCount, e = processDir(localDir, remoteDir)
+	if e != nil {
+		return changeCount, e
+	}
+
+	// sync all of the remote files
+	for _, remoteFileHash := range remoteFileHashes {
+		remoteFileName := remoteFileHash.FileName
+
+		// skip the remote file if we don't start with the right prefix
+		if !strings.HasPrefix(remoteFileName, remoteDir) {
+			continue
+		}
+
+		// build the local file path
+		localFileName := localDir + remoteFileName[len(remoteDir):]
+
+		// have we already processed it?
+		_, processed := alreadyProccessed[localFileName]
+		if processed {
+			continue
+		}
+
+		dirIndex := strings.LastIndex(localFileName, "/")
+		if dirIndex > 0 {
+			// ensure the directory exists already
+			// FIXME: DIRECTORY PERMISSIONS ARE NOT SAVED
+			dirToCreate := localFileName[:dirIndex]
+			err = os.MkdirAll(dirToCreate, 0777)
+			if err != nil {
+				return changeCount, fmt.Errorf("Failed to create the local directory for %s: %v", localDir, err)
+			}
+		}
+
+		// attempt the remote file sync
+		_, changes, err := s.syncFile(localFileName, remoteFileName)
+		if err != nil {
+			return changeCount, fmt.Errorf("Failed to sync remote file (%s) with the local file (%s): %v", remoteFileName, localFileName, err)
+		}
+
+		// on success, keep processing and update the change count
+		changeCount += changes
+	}
+
+	return changeCount, nil
+}
 
 func (s *commandState) syncFile(localFilename string, remoteFilepath string) (status int, changeCount int, e error) {
 	var getReq models.FileGetByNameRequest
@@ -260,13 +365,8 @@ func (s *commandState) syncDownload(remoteID int, filename string, remoteFilepat
 			return chunksWritten, fmt.Errorf("Failed to get the file chunk #%d for file id%d: %v", i, remoteID, err)
 		}
 
-		// trim the buffer at the EOF marker of byte(0)
+		// write out the chunk that was downloaded
 		chunk := chunkResp.Chunk.Chunk
-		eofIndex := bytes.IndexByte(chunk, byte(0))
-		if eofIndex > 0 && eofIndex < len(chunk) {
-			chunk = chunk[:eofIndex]
-		}
-
 		_, err = localFile.Write(chunk)
 		if err != nil {
 			return chunksWritten, fmt.Errorf("Failed to write to the #%d chunk to the local file %s: %v", i, filename, err)
