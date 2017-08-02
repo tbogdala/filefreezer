@@ -31,6 +31,8 @@ const (
 		FileID 		INTEGER PRIMARY KEY	NOT NULL,
 		UserID 		INTEGER 			NOT NULL,
 		FileName	TEXT				NOT NULL,
+		IsDir       INTEGER             NOT NULL,
+		Perms       INTEGER             NOT NULL,
 		LastMod		INTEGER				NOT NULL,
 		ChunkCount  INTEGER				NOT NULL,
 		FileHash	TEXT				NOT NULL
@@ -54,12 +56,12 @@ const (
 	updateUserStats = `UPDATE UserStats SET Allocated = Allocated + (?), Revision = Revision + 1 WHERE UserID = ?;`
 	setUserQuota    = `UPDATE UserStats SET Quota = (?) WHERE UserID = ?;`
 
-	addFileInfo = `INSERT INTO FileInfo (UserID, FileName, LastMod, ChunkCount, FileHash) SELECT ?, ?, ?, ?, ?
+	addFileInfo = `INSERT INTO FileInfo (UserID, FileName, IsDir, Perms, LastMod, ChunkCount, FileHash) SELECT ?, ?, ?, ?, ?, ?, ?
 						WHERE NOT EXISTS (SELECT 1 FROM FileInfo WHERE UserID = ? AND FileName = ?);`
-	getFileInfo        = `SELECT UserID, FileName, LastMod, ChunkCount, FileHash FROM FileInfo WHERE FileID = ?;`
-	getFileInfoByName  = `SELECT FileID, LastMod, ChunkCount, FileHash FROM FileInfo WHERE FileName = ? AND UserID = ?;`
+	getFileInfo        = `SELECT UserID, FileName, IsDir, Perms, LastMod, ChunkCount, FileHash FROM FileInfo WHERE FileID = ?;`
+	getFileInfoByName  = `SELECT FileID, IsDir, Perms, LastMod, ChunkCount, FileHash FROM FileInfo WHERE FileName = ? AND UserID = ?;`
 	getFileInfoOwner   = `SELECT UserID  FROM FileInfo WHERE FileID = ?;`
-	getAllUserFiles    = `SELECT FileID, FileName, LastMod, ChunkCount, FileHash FROM FileInfo WHERE UserID = ?;`
+	getAllUserFiles    = `SELECT FileID, FileName, IsDir, Perms, LastMod, ChunkCount, FileHash FROM FileInfo WHERE UserID = ?;`
 	removeFileInfoByID = `DELETE FROM FileInfo WHERE FileID = ?;`
 
 	getAllFileChunksByID = `SELECT ChunkNum, ChunkHash FROM FileChunks WHERE FileID = ?;`
@@ -78,12 +80,14 @@ const (
 
 // FileInfo contains the information stored about a given file for a particular user.
 type FileInfo struct {
-	UserID     int
-	FileID     int
-	FileName   string
-	LastMod    int64
-	ChunkCount int
-	FileHash   string
+	UserID      int
+	FileID      int
+	FileName    string
+	IsDir       bool
+	Permissions uint32
+	LastMod     int64
+	ChunkCount  int
+	FileHash    string
 }
 
 // FileChunk contains the information stored about a given file chunk.
@@ -444,8 +448,8 @@ func (s *Storage) RemoveFileInfo(fileID int) error {
 // lastmod (time in seconds since 1/1/1970) and the filehash string are provided as well. The
 // chunkCount parameter should be the number of chunks required for the size of the file. If the
 // file could not be added an error is returned, otherwise nil on success.
-func (s *Storage) AddFileInfo(userID int, filename string, lastMod int64, chunkCount int, fileHash string) (*FileInfo, error) {
-	res, err := s.db.Exec(addFileInfo, userID, filename, lastMod, chunkCount, fileHash, userID, filename)
+func (s *Storage) AddFileInfo(userID int, filename string, isDir bool, permissions uint32, lastMod int64, chunkCount int, fileHash string) (*FileInfo, error) {
+	res, err := s.db.Exec(addFileInfo, userID, filename, isDir, permissions, lastMod, chunkCount, fileHash, userID, filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add a new file info in the database: %v", err)
 	}
@@ -470,6 +474,8 @@ func (s *Storage) AddFileInfo(userID int, filename string, lastMod int64, chunkC
 	fi.FileHash = fileHash
 	fi.FileID = int(insertedID)
 	fi.FileName = filename
+	fi.IsDir = isDir
+	fi.Permissions = permissions
 	fi.LastMod = lastMod
 	fi.UserID = userID
 
@@ -489,7 +495,7 @@ func (s *Storage) GetAllUserFileInfos(userID int) ([]FileInfo, error) {
 	result := []FileInfo{}
 	for rows.Next() {
 		var fi FileInfo
-		err := rows.Scan(&fi.FileID, &fi.FileName, &fi.LastMod, &fi.ChunkCount, &fi.FileHash)
+		err := rows.Scan(&fi.FileID, &fi.FileName, &fi.IsDir, &fi.Permissions, &fi.LastMod, &fi.ChunkCount, &fi.FileHash)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan the next row while processing user file infos: %v", err)
 		}
@@ -519,7 +525,7 @@ func (s *Storage) GetFileInfo(userID int, fileID int) (*FileInfo, error) {
 			return fmt.Errorf("user does not own the file id supplied")
 		}
 
-		err = tx.QueryRow(getFileInfo, fileID).Scan(&fi.UserID, &fi.FileName, &fi.LastMod, &fi.ChunkCount, &fi.FileHash)
+		err = tx.QueryRow(getFileInfo, fileID).Scan(&fi.UserID, &fi.FileName, &fi.IsDir, &fi.Permissions, &fi.LastMod, &fi.ChunkCount, &fi.FileHash)
 		if err != nil {
 			return err
 		}
@@ -537,7 +543,7 @@ func (s *Storage) GetFileInfo(userID int, fileID int) (*FileInfo, error) {
 // by the userID and filename parameters. If this query was unsuccessful an error is returned.
 func (s *Storage) GetFileInfoByName(userID int, filename string) (*FileInfo, error) {
 	fi := new(FileInfo)
-	err := s.db.QueryRow(getFileInfoByName, filename, userID).Scan(&fi.FileID, &fi.LastMod, &fi.ChunkCount, &fi.FileHash)
+	err := s.db.QueryRow(getFileInfoByName, filename, userID).Scan(&fi.FileID, &fi.IsDir, &fi.Permissions, &fi.LastMod, &fi.ChunkCount, &fi.FileHash)
 	if err != nil {
 		return nil, err
 	}
@@ -607,7 +613,7 @@ func (s *Storage) GetMissingChunkNumbersForFile(userID int, fileID int) ([]int, 
 		}
 
 		// get the file information
-		err = tx.QueryRow(getFileInfo, fileID).Scan(&fi.UserID, &fi.FileName, &fi.LastMod, &fi.ChunkCount, &fi.FileHash)
+		err = tx.QueryRow(getFileInfo, fileID).Scan(&fi.UserID, &fi.FileName, &fi.IsDir, &fi.Permissions, &fi.LastMod, &fi.ChunkCount, &fi.FileHash)
 		if err != nil {
 			return err
 		}

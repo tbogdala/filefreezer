@@ -70,10 +70,12 @@ type FilePutResponse struct {
 // FilePutRequest is the JSON serializable request object sent to the
 // /api/files PUT handlder.
 type FilePutRequest struct {
-	FileName   string
-	LastMod    int64
-	ChunkCount int
-	FileHash   string
+	FileName    string
+	IsDir       bool
+	Permissions uint32
+	LastMod     int64
+	ChunkCount  int
+	FileHash    string
 }
 
 // FileDeleteRequest is the JSON serializable request object sent to the

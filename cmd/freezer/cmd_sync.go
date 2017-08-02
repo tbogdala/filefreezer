@@ -142,11 +142,11 @@ func (s *commandState) syncFile(localFilename string, remoteFilepath string) (st
 	// if the file is not registered with the storage server, then upload it ...
 	// futher checking will be unnecessary.
 	if err != nil {
-		localChunkCount, localLastMod, localHash, err := filefreezer.CalcFileHashInfo(s.serverCapabilities.ChunkSize, localFilename)
+		localChunkCount, localLastMod, localPerms, localHash, err := filefreezer.CalcFileHashInfo(s.serverCapabilities.ChunkSize, localFilename)
 		if err != nil {
 			return syncStatusMissing, 0, fmt.Errorf("Failed to calculate the file hash data for %s: %v", localFilename, err)
 		}
-		ulCount, err := s.syncUpload(localFilename, remoteFilepath, localLastMod, localChunkCount, localHash)
+		ulCount, err := s.syncUpload(localFilename, remoteFilepath, false, localPerms, localLastMod, localChunkCount, localHash)
 		if err != nil {
 			return syncStatusMissing, ulCount, fmt.Errorf("Failed to upload the file to the server %s: %v", s.hostURI, err)
 		}
@@ -168,13 +168,14 @@ func (s *commandState) syncFile(localFilename string, remoteFilepath string) (st
 	}
 
 	// calculate some of the local file information
-	localChunkCount, localLastMod, localHash, err := filefreezer.CalcFileHashInfo(s.serverCapabilities.ChunkSize, localFilename)
+	localChunkCount, localLastMod, localPermissions, localHash, err := filefreezer.CalcFileHashInfo(s.serverCapabilities.ChunkSize, localFilename)
 	if err != nil {
 		return 0, 0, fmt.Errorf("Failed to calculate the file hash data for %s: %v", localFilename, err)
 	}
 
 	// lets prove that we don't need to do anything for some cases
 	// NOTE: a lastMod difference here doesn't trigger a difference if other metrics check out the same
+	// NOTE: a difference in permissions also doesn't trigger a difference
 	if localHash == remote.FileHash && len(remote.MissingChunks) == 0 && localChunkCount == remote.ChunkCount {
 		different := false
 		if *flagExtraStrict {
@@ -223,7 +224,7 @@ func (s *commandState) syncFile(localFilename string, remoteFilepath string) (st
 	// at this point we have a file difference. we'll use the local file as the source of truth
 	// if it's lastMod is newer than the remote file.
 	if localLastMod > remote.LastMod {
-		ulCount, e := s.syncUploadNewer(remote.FileID, localFilename, remoteFilepath, localLastMod, localChunkCount, localHash)
+		ulCount, e := s.syncUploadNewer(remote.FileID, localFilename, remoteFilepath, false, localPermissions, localLastMod, localChunkCount, localHash)
 		return syncStatusLocalNewer, ulCount, e
 	}
 
@@ -277,7 +278,7 @@ func (s *commandState) syncUploadMissing(remoteID int, filename string, remoteFi
 	return uploadCount, nil
 }
 
-func (s *commandState) syncUploadNewer(remoteFileID int, filename string, remoteFilepath string, localLastMod int64, localChunkCount int, localHash string) (uploadCount int, e error) {
+func (s *commandState) syncUploadNewer(remoteFileID int, filename string, remoteFilepath string, isDir bool, localPermissions uint32, localLastMod int64, localChunkCount int, localHash string) (uploadCount int, e error) {
 	// make sure to delete the remote file
 	target := fmt.Sprintf("%s/api/file/%d", s.hostURI, remoteFileID)
 	_, err := runAuthRequest(target, "DELETE", s.authToken, nil)
@@ -287,13 +288,15 @@ func (s *commandState) syncUploadNewer(remoteFileID int, filename string, remote
 	log.Printf("%s XXX deleted remote", filename)
 
 	// now upload the local file
-	return s.syncUpload(filename, remoteFilepath, localLastMod, localChunkCount, localHash)
+	return s.syncUpload(filename, remoteFilepath, isDir, localPermissions, localLastMod, localChunkCount, localHash)
 }
 
-func (s *commandState) syncUpload(filename string, remoteFilepath string, localLastMod int64, localChunkCount int, localHash string) (uploadCount int, e error) {
+func (s *commandState) syncUpload(filename string, remoteFilepath string, isDir bool, localPermissions uint32, localLastMod int64, localChunkCount int, localHash string) (uploadCount int, e error) {
 	// establish a new file on the remote freezer
 	var putReq models.FilePutRequest
 	putReq.FileName = remoteFilepath
+	putReq.IsDir = isDir
+	putReq.Permissions = localPermissions
 	putReq.LastMod = localLastMod
 	putReq.ChunkCount = localChunkCount
 	putReq.FileHash = localHash

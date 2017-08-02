@@ -76,6 +76,9 @@ Known Bugs and Limitations
 
 * Empty directories do not get synced.
 
+* Consider a quota for max fileinfo registered so service cannot be DDOS'd 
+  by registering infinite files.
+
 
 TODO / Notes
 ------------
@@ -94,18 +97,11 @@ TODO / Notes
 * flag: hash on start instead of just checking mod time
 * flag: verbosity level
 
-* Storage needs a rename user function. This needs to be exposed
-  through a command in cmd/freezer and added to unit tests in both
-  places.
-
 * make sure it only adds files automatically, not symlinks
+
 * work on readability of error messages wrt bubbling up error objects
-* Server could return capabilities in json response to login that
-  could have things like MaxChunkSize for the client to use.
 
-* When removing a user, any files and chunks owned by the user should
-  also be removed.
-
+  
 
 Workflows
 ---------

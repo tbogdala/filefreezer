@@ -35,12 +35,14 @@ func (s *commandState) rmFile(filename string) error {
 	return nil
 }
 
-func (s *commandState) addFile(fileName string, remoteFilepath string, lastMod int64, chunkCount int, fileHash string) (int, error) {
+func (s *commandState) addFile(fileName string, remoteFilepath string, isDir bool, permissions uint32, lastMod int64, chunkCount int, fileHash string) (int, error) {
 	var putReq models.FilePutRequest
 	putReq.FileName = remoteFilepath
 	putReq.LastMod = lastMod
 	putReq.ChunkCount = chunkCount
 	putReq.FileHash = fileHash
+	putReq.IsDir = isDir
+	putReq.Permissions = permissions
 
 	target := fmt.Sprintf("%s/api/files", s.hostURI)
 	body, err := runAuthRequest(target, "POST", s.authToken, putReq)

@@ -16,7 +16,7 @@ import (
 
 // CalcFileHashInfo takes the file name and calculates the number of chunks, last modified time
 // and hash string for the file. An error is returned on failure.
-func CalcFileHashInfo(maxChunkSize int64, filename string) (chunkCount int, lastMod int64, hashString string, e error) {
+func CalcFileHashInfo(maxChunkSize int64, filename string) (chunkCount int, lastMod int64, permissions uint32, hashString string, e error) {
 	fileInfo, err := os.Stat(filename)
 	if err != nil {
 		e = fmt.Errorf("failed to stat the local file (%s) for the test", filename)
@@ -24,6 +24,7 @@ func CalcFileHashInfo(maxChunkSize int64, filename string) (chunkCount int, last
 	}
 
 	lastMod = fileInfo.ModTime().UTC().Unix()
+	permissions = uint32(fileInfo.Mode())
 
 	// calculate the chunk count required for the file size
 	fileSize := fileInfo.Size()

@@ -410,7 +410,7 @@ func handlePutFile(state *serverState) http.HandlerFunc {
 		}
 
 		// register a new file in storage with the information
-		fi, err := state.Storage.AddFileInfo(userCreds.ID, req.FileName, req.LastMod, req.ChunkCount, req.FileHash)
+		fi, err := state.Storage.AddFileInfo(userCreds.ID, req.FileName, req.IsDir, req.Permissions, req.LastMod, req.ChunkCount, req.FileHash)
 		if err != nil {
 			http.Error(w, "Failed to put a new file in storage for the user. "+err.Error(), http.StatusConflict)
 			return

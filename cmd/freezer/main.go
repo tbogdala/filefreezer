@@ -5,10 +5,7 @@ package main
 
 import (
 	"bufio"
-	"crypto/sha1"
-	"encoding/base64"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 
@@ -177,12 +174,13 @@ func main() {
 		if len(remoteTarget) < 1 {
 			remoteTarget = filepath
 		}
-		data, err := calcFileHashInfo(cmdState.serverCapabilities.ChunkSize, filepath)
+		chunkCount, lastMod, permissions, hashString, err := filefreezer.CalcFileHashInfo(cmdState.serverCapabilities.ChunkSize, filepath)
+
 		if err != nil {
 			log.Fatalf("Failed to calculate the required data for the file %s: %v", filepath, err)
 		}
 
-		fileID, err := cmdState.addFile(filepath, remoteTarget, data.LastMod, data.ChunkCount, data.Hash)
+		fileID, err := cmdState.addFile(filepath, remoteTarget, false, permissions, lastMod, chunkCount, hashString)
 		if err != nil {
 			log.Fatalf("Failed to register the file on the server %s: %v", *argAddFileHost, err)
 		}
@@ -259,11 +257,14 @@ func main() {
 	}
 }
 
+/*
 // fileHashData encapsulates return data for file hash calculation.
 type fileHashData struct {
-	Hash       string
-	LastMod    int64
-	ChunkCount int
+	Hash        string
+	IsDir       bool
+	Permissions uint32
+	LastMod     int64
+	ChunkCount  int
 }
 
 // calcFileHashInfo calculates the file hash as well as pulling useful information such as
@@ -294,3 +295,4 @@ func calcFileHashInfo(maxChunkSize int64, filename string) (*fileHashData, error
 
 	return data, nil
 }
+*/

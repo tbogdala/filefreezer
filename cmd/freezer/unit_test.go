@@ -162,13 +162,13 @@ func TestEverything(t *testing.T) {
 
 	// test adding a file
 	filename := testFilename1
-	chunkCount, lastMod, hashString, err := filefreezer.CalcFileHashInfo(cmdState.serverCapabilities.ChunkSize, filename)
+	chunkCount, lastMod, permissions, hashString, err := filefreezer.CalcFileHashInfo(cmdState.serverCapabilities.ChunkSize, filename)
 	if err != nil {
 		t.Fatalf("Failed to calculate the file hash for %s: %v", filename, err)
 	}
 	t.Logf("Calculated hash data for %s ...", filename)
 
-	fileID, err := cmdState.addFile(filename, filename, lastMod, chunkCount, hashString)
+	fileID, err := cmdState.addFile(filename, filename, false, permissions, lastMod, chunkCount, hashString)
 	if err != nil {
 		t.Fatalf("Failed to at the file %s: %v", filename, err)
 	}

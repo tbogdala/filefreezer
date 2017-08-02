@@ -60,13 +60,13 @@ func TestQuotasAndPermissions(t *testing.T) {
 	}
 
 	filename := "../storage.go"
-	chunkCount, lastMod, hashString, err := filefreezer.CalcFileHashInfo(store.ChunkSize, filename)
+	chunkCount, lastMod, permissions, hashString, err := filefreezer.CalcFileHashInfo(store.ChunkSize, filename)
 	if err != nil {
 		t.Fatalf("Failed to calculate the file hash data (%s): %v", filename, err)
 	}
 
 	// add the file information to the storage server
-	fi, err := store.AddFileInfo(user.ID, filename, lastMod, chunkCount, hashString)
+	fi, err := store.AddFileInfo(user.ID, filename, false, permissions, lastMod, chunkCount, hashString)
 	if err != nil {
 		t.Fatalf("Failed to add a new file (%s): %v", filename, err)
 	}
@@ -193,13 +193,13 @@ func TestBasicDBCreation(t *testing.T) {
 
 	// pull up the local file information
 	filename := "../README.md"
-	chunkCount, lastMod, hashString, err := filefreezer.CalcFileHashInfo(store.ChunkSize, filename)
+	chunkCount, lastMod, permissions, hashString, err := filefreezer.CalcFileHashInfo(store.ChunkSize, filename)
 	if err != nil {
 		t.Fatalf("Failed to calculate the file hash for %s: %v", filename, err)
 	}
 
 	// add the file information to the storage server
-	fi, err := store.AddFileInfo(user.ID, filename, lastMod, chunkCount, hashString)
+	fi, err := store.AddFileInfo(user.ID, filename, false, permissions, lastMod, chunkCount, hashString)
 	if err != nil {
 		t.Fatalf("Failed to add a new file (%s): %v", filename, err)
 	}
@@ -224,7 +224,7 @@ func TestBasicDBCreation(t *testing.T) {
 	}
 
 	// add the file information to the storage server again for the rest of the tests
-	_, err = store.AddFileInfo(user.ID, filename, lastMod, chunkCount, hashString)
+	_, err = store.AddFileInfo(user.ID, filename, false, permissions, lastMod, chunkCount, hashString)
 	if err != nil {
 		t.Fatalf("Failed to add a new file (%s): %v", filename, err)
 	}
@@ -241,7 +241,8 @@ func TestBasicDBCreation(t *testing.T) {
 	var first, second *filefreezer.FileInfo
 	first = &fileInfos[0]
 	if first.UserID != user.ID || first.FileID != 1 || first.FileName != filename ||
-		first.ChunkCount != chunkCount || first.LastMod != lastMod || first.FileHash != hashString {
+		first.ChunkCount != chunkCount || first.LastMod != lastMod || first.FileHash != hashString ||
+		first.IsDir != false || first.Permissions != permissions {
 		t.Fatalf("The file information returned %s was incorrect: %v", filename, first)
 	}
 
@@ -249,7 +250,8 @@ func TestBasicDBCreation(t *testing.T) {
 	fileByID, err := store.GetFileInfo(first.UserID, first.FileID)
 	if err != nil || first.UserID != fileByID.UserID || first.FileID != fileByID.FileID ||
 		first.ChunkCount != fileByID.ChunkCount || first.FileName != fileByID.FileName ||
-		first.LastMod != fileByID.LastMod || first.FileHash != fileByID.FileHash {
+		first.LastMod != fileByID.LastMod || first.FileHash != fileByID.FileHash ||
+		first.IsDir != fileByID.IsDir || first.Permissions != fileByID.Permissions {
 		t.Fatalf("Failed to get the added file using the fileID (%d) returned by GetAllUserFileInfos(): %v", first.FileID, err)
 	}
 
@@ -267,19 +269,19 @@ func TestBasicDBCreation(t *testing.T) {
 
 	// add a second file
 	filename = "../storage.go"
-	chunkCount, lastMod, hashString, err = filefreezer.CalcFileHashInfo(store.ChunkSize, filename)
+	chunkCount, lastMod, permissions, hashString, err = filefreezer.CalcFileHashInfo(store.ChunkSize, filename)
 	if err != nil {
 		t.Fatalf("Failed to calculate the file hash for %s: %v", filename, err)
 	}
 
 	// add the file information to the storage server
-	_, err = store.AddFileInfo(user.ID, filename, lastMod, chunkCount, hashString)
+	_, err = store.AddFileInfo(user.ID, filename, false, permissions, lastMod, chunkCount, hashString)
 	if err != nil {
 		t.Fatalf("Failed to add a new file (%s): %v", filename, err)
 	}
 
 	// attempt to add the same file information again, which should fail as a duplicate
-	_, err = store.AddFileInfo(user.ID, filename, lastMod, chunkCount, hashString)
+	_, err = store.AddFileInfo(user.ID, filename, false, permissions, lastMod, chunkCount, hashString)
 	if err == nil {
 		t.Fatal("Added a duplicate filename under the same user successuflly when a failure was expected.")
 	}
@@ -352,7 +354,7 @@ func TestBasicDBCreation(t *testing.T) {
 	}
 
 	// add the first file back in so that the rests of the tests can continue
-	first, err = store.AddFileInfo(first.UserID, first.FileName, first.LastMod, first.ChunkCount, first.FileHash)
+	first, err = store.AddFileInfo(first.UserID, first.FileName, first.IsDir, first.Permissions, first.LastMod, first.ChunkCount, first.FileHash)
 	if err != nil {
 		t.Fatalf("Failed to add a the file again (%s): %v", first.FileName, err)
 	}
