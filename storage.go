@@ -41,6 +41,7 @@ const (
 	createFileChunksTable = `CREATE TABLE FileChunks (
 		ChunkID     INTEGER PRIMARY KEY	NOT NULL,
 		FileID 		INTEGER             NOT NULL,
+		Version     INTEGER             NOT NULL,
 		ChunkNum	INTEGER 			NOT NULL,
 		ChunkHash	TEXT				NOT NULL,
 		Chunk		BLOB				NOT NULL
@@ -64,12 +65,12 @@ const (
 	getAllUserFiles    = `SELECT FileID, FileName, IsDir, Perms, LastMod, ChunkCount, FileHash FROM FileInfo WHERE UserID = ?;`
 	removeFileInfoByID = `DELETE FROM FileInfo WHERE FileID = ?;`
 
-	getAllFileChunksByID = `SELECT ChunkNum, ChunkHash FROM FileChunks WHERE FileID = ?;`
-	addFileChunk         = `INSERT OR REPLACE INTO FileChunks (FileID, ChunkNum, ChunkHash, Chunk) 
-							  VALUES (?, ?, ?, ?);`
+	getAllFileChunksByID = `SELECT ChunkNum, ChunkHash FROM FileChunks WHERE FileID = ? AND Version = ?;`
+	addFileChunk         = `INSERT OR REPLACE INTO FileChunks (FileID, Version, ChunkNum, ChunkHash, Chunk) 
+							  VALUES (?, ?, ?, ?, ?);`
 	removeAllFileChunks   = `DELETE FROM FileChunks WHERE FileID = ?;`
-	removeFileChunk       = `DELETE FROM FileChunks WHERE FileID = ? AND ChunkNum = ?;`
-	getFileChunk          = `SELECT ChunkHash, Chunk FROM FileChunks WHERE FileID = ? AND ChunkNum = ?;`
+	removeFileChunk       = `DELETE FROM FileChunks WHERE FileID = ? AND Version = ? AND ChunkNum = ?;`
+	getFileChunk          = `SELECT ChunkHash, Chunk FROM FileChunks WHERE FileID = ? AND Version = ? AND ChunkNum = ?;`
 	getFileTotalChunkSize = "SELECT SUM(LENGTH(Chunk)) FROM FileChunks WHERE FileID = ?;"
 
 	removeUser = `DELETE FROM FileChunks WHERE FileID IN (SELECT FileID FROM FileInfo WHERE UserID = ?);
@@ -80,10 +81,16 @@ const (
 
 // FileInfo contains the information stored about a given file for a particular user.
 type FileInfo struct {
-	UserID      int
-	FileID      int
-	FileName    string
-	IsDir       bool
+	UserID         int
+	FileID         int
+	FileName       string
+	IsDir          bool
+	CurrentVersion FileVersionInfo
+}
+
+// FileVersionInfo contains the version-specific information for a given file.
+type FileVersionInfo struct {
+	VersionID   int
 	Permissions uint32
 	LastMod     int64
 	ChunkCount  int
@@ -470,14 +477,15 @@ func (s *Storage) AddFileInfo(userID int, filename string, isDir bool, permissio
 
 	// generate a new UserFileInfo that contains the ID for the file just added to the database
 	fi := new(FileInfo)
-	fi.ChunkCount = chunkCount
-	fi.FileHash = fileHash
 	fi.FileID = int(insertedID)
+	fi.UserID = userID
 	fi.FileName = filename
 	fi.IsDir = isDir
-	fi.Permissions = permissions
-	fi.LastMod = lastMod
-	fi.UserID = userID
+
+	fi.CurrentVersion.Permissions = permissions
+	fi.CurrentVersion.LastMod = lastMod
+	fi.CurrentVersion.ChunkCount = chunkCount
+	fi.CurrentVersion.FileHash = fileHash
 
 	return fi, nil
 }
@@ -495,7 +503,8 @@ func (s *Storage) GetAllUserFileInfos(userID int) ([]FileInfo, error) {
 	result := []FileInfo{}
 	for rows.Next() {
 		var fi FileInfo
-		err := rows.Scan(&fi.FileID, &fi.FileName, &fi.IsDir, &fi.Permissions, &fi.LastMod, &fi.ChunkCount, &fi.FileHash)
+		err := rows.Scan(&fi.FileID, &fi.FileName, &fi.IsDir, &fi.CurrentVersion.Permissions,
+			&fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan the next row while processing user file infos: %v", err)
 		}
@@ -525,7 +534,8 @@ func (s *Storage) GetFileInfo(userID int, fileID int) (*FileInfo, error) {
 			return fmt.Errorf("user does not own the file id supplied")
 		}
 
-		err = tx.QueryRow(getFileInfo, fileID).Scan(&fi.UserID, &fi.FileName, &fi.IsDir, &fi.Permissions, &fi.LastMod, &fi.ChunkCount, &fi.FileHash)
+		err = tx.QueryRow(getFileInfo, fileID).Scan(&fi.UserID, &fi.FileName, &fi.IsDir, &fi.CurrentVersion.Permissions,
+			&fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
 		if err != nil {
 			return err
 		}
@@ -543,7 +553,8 @@ func (s *Storage) GetFileInfo(userID int, fileID int) (*FileInfo, error) {
 // by the userID and filename parameters. If this query was unsuccessful an error is returned.
 func (s *Storage) GetFileInfoByName(userID int, filename string) (*FileInfo, error) {
 	fi := new(FileInfo)
-	err := s.db.QueryRow(getFileInfoByName, filename, userID).Scan(&fi.FileID, &fi.IsDir, &fi.Permissions, &fi.LastMod, &fi.ChunkCount, &fi.FileHash)
+	err := s.db.QueryRow(getFileInfoByName, filename, userID).Scan(&fi.FileID, &fi.IsDir, &fi.CurrentVersion.Permissions,
+		&fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
 	if err != nil {
 		return nil, err
 	}
@@ -554,7 +565,7 @@ func (s *Storage) GetFileInfoByName(userID int, filename string) (*FileInfo, err
 
 // GetFileChunkInfos returns a slice of FileChunks containing all of the chunk
 // information except for the chunk bytes themselves.
-func (s *Storage) GetFileChunkInfos(userID int, fileID int) ([]FileChunk, error) {
+func (s *Storage) GetFileChunkInfos(userID int, fileID int, version int) ([]FileChunk, error) {
 	var chunk FileChunk
 	knownChunks := []FileChunk{}
 	err := s.transact(func(tx *sql.Tx) error {
@@ -569,7 +580,7 @@ func (s *Storage) GetFileChunkInfos(userID int, fileID int) ([]FileChunk, error)
 		}
 
 		// get all of the file chunks for the file
-		rows, err := tx.Query(getAllFileChunksByID, fileID)
+		rows, err := tx.Query(getAllFileChunksByID, fileID, version)
 		if err != nil {
 			return fmt.Errorf("failed to get all of the file chunks from the database for fileID %d: %v", fileID, err)
 		}
@@ -598,7 +609,7 @@ func (s *Storage) GetFileChunkInfos(userID int, fileID int) ([]FileChunk, error)
 
 // GetMissingChunkNumbersForFile will return a slice of chunk numbers that have
 // not been added for a given file.
-func (s *Storage) GetMissingChunkNumbersForFile(userID int, fileID int) ([]int, error) {
+func (s *Storage) GetMissingChunkNumbersForFile(userID int, fileID int, version int) ([]int, error) {
 	var fi FileInfo
 	knownChunks := []int{}
 	err := s.transact(func(tx *sql.Tx) error {
@@ -613,14 +624,15 @@ func (s *Storage) GetMissingChunkNumbersForFile(userID int, fileID int) ([]int, 
 		}
 
 		// get the file information
-		err = tx.QueryRow(getFileInfo, fileID).Scan(&fi.UserID, &fi.FileName, &fi.IsDir, &fi.Permissions, &fi.LastMod, &fi.ChunkCount, &fi.FileHash)
+		err = tx.QueryRow(getFileInfo, fileID).Scan(&fi.UserID, &fi.FileName, &fi.IsDir, &fi.CurrentVersion.Permissions,
+			&fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
 		if err != nil {
 			return err
 		}
 		fi.FileID = fileID
 
 		// get all of the file chunks for the file
-		rows, err := tx.Query(getAllFileChunksByID, fileID)
+		rows, err := tx.Query(getAllFileChunksByID, fileID, version)
 		if err != nil {
 			return fmt.Errorf("failed to get all of the file chunks from the database for fileID %d: %v", fileID, err)
 		}
@@ -652,7 +664,7 @@ func (s *Storage) GetMissingChunkNumbersForFile(userID int, fileID int) ([]int, 
 	// attempt to find each chunk number in the known list and
 	// log the ones that are not found.
 	mia := []int{}
-	for i := 0; i < fi.ChunkCount; i++ {
+	for i := 0; i < fi.CurrentVersion.ChunkCount; i++ {
 		if sort.SearchInts(knownChunks, i) >= maxKnown {
 			mia = append(mia, i)
 		}
@@ -665,7 +677,7 @@ func (s *Storage) GetMissingChunkNumbersForFile(userID int, fileID int) ([]int, 
 // AddFileChunk adds a binary chunk to storage for a given file at a position in the file
 // determined by the chunkNumber passed in and identified by the chunkHash. The userID is used
 // to update the allocation count in the same transaction as well as verify ownership.
-func (s *Storage) AddFileChunk(userID int, fileID int, chunkNumber int, chunkHash string, chunk []byte) (*FileChunk, error) {
+func (s *Storage) AddFileChunk(userID int, fileID int, version int, chunkNumber int, chunkHash string, chunk []byte) (*FileChunk, error) {
 	chunkLength := int64(len(chunk))
 
 	// sanity check the length of the chunk
@@ -698,7 +710,7 @@ func (s *Storage) AddFileChunk(userID int, fileID int, chunkNumber int, chunkHas
 		}
 
 		// now the that prechecks have succeeded, add the file
-		res, err := tx.Exec(addFileChunk, fileID, chunkNumber, chunkHash, chunk)
+		res, err := tx.Exec(addFileChunk, fileID, version, chunkNumber, chunkHash, chunk)
 		if err != nil {
 			return fmt.Errorf("failed to add a new file chunk in the database: %v", err)
 		}
@@ -742,7 +754,7 @@ func (s *Storage) AddFileChunk(userID int, fileID int, chunkNumber int, chunkHas
 // simply have no effect. An bool indicating if the chunk was successfully removed is returned
 // as well as an error on failure. userID is required so that the allocation count can updated
 // in the same transaction as well as to verify ownership of the chunk.
-func (s *Storage) RemoveFileChunk(userID int, fileID int, chunkNumber int) (bool, error) {
+func (s *Storage) RemoveFileChunk(userID int, fileID int, version int, chunkNumber int) (bool, error) {
 	err := s.transact(func(tx *sql.Tx) error {
 		// check to make sure the user owns the file id
 		var owningUserID int
@@ -758,14 +770,14 @@ func (s *Storage) RemoveFileChunk(userID int, fileID int, chunkNumber int) (bool
 		// remove from the user's allocation count
 		var chunkHash string
 		var chunk []byte
-		err = tx.QueryRow(getFileChunk, fileID, chunkNumber).Scan(&chunkHash, &chunk)
+		err = tx.QueryRow(getFileChunk, fileID, version, chunkNumber).Scan(&chunkHash, &chunk)
 		if err != nil {
 			return fmt.Errorf("failed to get the existing chunk before removal: %v", err)
 		}
 		allocationCount := len(chunk)
 
 		// remove the chunk from the table
-		res, err := tx.Exec(removeFileChunk, fileID, chunkNumber)
+		res, err := tx.Exec(removeFileChunk, fileID, version, chunkNumber)
 		if err != nil {
 			return fmt.Errorf("failed to remove the file chunk in the database: %v", err)
 		}
@@ -804,12 +816,12 @@ func (s *Storage) RemoveFileChunk(userID int, fileID int, chunkNumber int) (bool
 
 // GetFileChunk retrieves a file chunk from storage and returns it. An error value
 // is returned on failure.
-func (s *Storage) GetFileChunk(fileID int, chunkNumber int) (fc *FileChunk, e error) {
+func (s *Storage) GetFileChunk(fileID int, chunkNumber int, version int) (fc *FileChunk, e error) {
 	fc = new(FileChunk)
 	fc.FileID = fileID
 	fc.ChunkNumber = chunkNumber
 
-	e = s.db.QueryRow(getFileChunk, fileID, chunkNumber).Scan(&fc.ChunkHash, &fc.Chunk)
+	e = s.db.QueryRow(getFileChunk, fileID, version, chunkNumber).Scan(&fc.ChunkHash, &fc.Chunk)
 	return
 }
 
