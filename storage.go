@@ -59,7 +59,7 @@ const (
 	getUser          = `SELECT UserID, Salt, Password FROM Users  WHERE Name = ?;`
 	updateUser       = `UPDATE Users SET Name = ?, Salt = ?, Password = ? WHERE UserID = ?;`
 
-    
+
 	setUserStats    = `INSERT OR REPLACE INTO UserStats (UserID, Quota, Allocated, Revision) VALUES (?, ?, ?, ?);`
 	getUserStats    = `SELECT Quota, Allocated, Revision FROM UserStats WHERE UserID = ?;`
 	updateUserStats = `UPDATE UserStats SET Allocated = Allocated + (?), Revision = Revision + 1 WHERE UserID = ?;`
@@ -783,7 +783,7 @@ func (s *Storage) GetMissingChunkNumbersForFile(userID int, fileID int) ([]int, 
 // AddFileChunk adds a binary chunk to storage for a given file at a position in the file
 // determined by the chunkNumber passed in and identified by the chunkHash. The userID is used
 // to update the allocation count in the same transaction as well as verify ownership.
-func (s *Storage) AddFileChunk(userID int, fileID int, version int, chunkNumber int, chunkHash string, chunk []byte) (*FileChunk, error) {
+func (s *Storage) AddFileChunk(userID int, fileID int, versionID int, chunkNumber int, chunkHash string, chunk []byte) (*FileChunk, error) {
 	chunkLength := int64(len(chunk))
 
 	// sanity check the length of the chunk
@@ -816,7 +816,7 @@ func (s *Storage) AddFileChunk(userID int, fileID int, version int, chunkNumber 
 		}
 
 		// now the that prechecks have succeeded, add the file
-		res, err := tx.Exec(addFileChunk, fileID, version, chunkNumber, chunkHash, chunk)
+		res, err := tx.Exec(addFileChunk, fileID, versionID, chunkNumber, chunkHash, chunk)
 		if err != nil {
 			return fmt.Errorf("failed to add a new file chunk in the database: %v", err)
 		}
@@ -860,7 +860,7 @@ func (s *Storage) AddFileChunk(userID int, fileID int, version int, chunkNumber 
 // simply have no effect. An bool indicating if the chunk was successfully removed is returned
 // as well as an error on failure. userID is required so that the allocation count can updated
 // in the same transaction as well as to verify ownership of the chunk.
-func (s *Storage) RemoveFileChunk(userID int, fileID int, version int, chunkNumber int) (bool, error) {
+func (s *Storage) RemoveFileChunk(userID int, fileID int, versionID int, chunkNumber int) (bool, error) {
 	err := s.transact(func(tx *sql.Tx) error {
 		// check to make sure the user owns the file id
 		var owningUserID int
@@ -876,7 +876,7 @@ func (s *Storage) RemoveFileChunk(userID int, fileID int, version int, chunkNumb
 		// remove from the user's allocation count
 		var chunkHash string
 		var chunk []byte
-		err = tx.QueryRow(getFileChunk, fileID, version, chunkNumber).Scan(&chunkHash, &chunk)
+		err = tx.QueryRow(getFileChunk, fileID, versionID, chunkNumber).Scan(&chunkHash, &chunk)
 		if err != nil {
 			return fmt.Errorf("failed to get the existing chunk before removal: %v", err)
 		}
