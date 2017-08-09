@@ -14,69 +14,88 @@ import (
 
 const (
 	createUsersTable = `CREATE TABLE Users (
-		UserID 		INTEGER PRIMARY KEY	NOT NULL,
-		Name		TEXT	UNIQUE		NOT NULL ON CONFLICT ABORT,
-		Salt		TEXT				NOT NULL,
-		Password	BLOB				NOT NULL
-	);`
+        UserID 		INTEGER PRIMARY KEY	NOT NULL,
+        Name		TEXT	UNIQUE		NOT NULL ON CONFLICT ABORT,
+        Salt		TEXT				NOT NULL,
+        Password	BLOB				NOT NULL
+    );`
 
 	createUserStatsTable = `CREATE TABLE UserStats (
-		UserID 		INTEGER PRIMARY KEY	NOT NULL,
-		Quota		INTEGER				NOT NULL,
-		Allocated	INTEGER				NOT NULL,
-		Revision	INTEGER				NOT NULL
-	);`
+        UserID 		INTEGER PRIMARY KEY	NOT NULL,
+        Quota		INTEGER				NOT NULL,
+        Allocated	INTEGER				NOT NULL,
+        Revision	INTEGER				NOT NULL
+    );`
 
 	createFileInfoTable = `CREATE TABLE FileInfo (
-		FileID 		INTEGER PRIMARY KEY	NOT NULL,
-		UserID 		INTEGER 			NOT NULL,
-		FileName	TEXT				NOT NULL,
-		IsDir       INTEGER             NOT NULL,
-		Perms       INTEGER             NOT NULL,
-		LastMod		INTEGER				NOT NULL,
-		ChunkCount  INTEGER				NOT NULL,
-		FileHash	TEXT				NOT NULL
-	);`
+        FileID 	          INTEGER PRIMARY KEY  NOT NULL,
+        UserID 		      INTEGER              NOT NULL,
+        FileName	      TEXT                 NOT NULL,
+        IsDir             INTEGER              NOT NULL,
+        CurrentVersionID  INTEGER              NOT NULL
+      );`
+
+	createFileVersionTable = `CREATE TABLE FileVersion (
+        VersionID   INTEGER PRIMARY KEY	NOT NULL,
+        FileID 	    INTEGER 			NOT NULL,
+        VersionNum 	INTEGER 			NOT NULL,
+        Perms       INTEGER             NOT NULL,
+        LastMod		INTEGER				NOT NULL,
+        ChunkCount  INTEGER				NOT NULL,
+        FileHash	TEXT				NOT NULL
+    );`
 
 	createFileChunksTable = `CREATE TABLE FileChunks (
-		ChunkID     INTEGER PRIMARY KEY	NOT NULL,
-		FileID 		INTEGER             NOT NULL,
-		Version     INTEGER             NOT NULL,
-		ChunkNum	INTEGER 			NOT NULL,
-		ChunkHash	TEXT				NOT NULL,
-		Chunk		BLOB				NOT NULL
-	);`
+        ChunkID     INTEGER PRIMARY KEY	NOT NULL,
+        FileID 		INTEGER             NOT NULL,
+        VersionID   INTEGER             NOT NULL,
+        ChunkNum	INTEGER 			NOT NULL,
+        ChunkHash	TEXT				NOT NULL,
+        Chunk		BLOB				NOT NULL
+    );`
 
 	lookupUserByName = `SELECT Name FROM Users WHERE Name = ?;`
 	addUser          = `INSERT INTO Users (Name, Salt, Password) VALUES (?, ?, ?);`
 	getUser          = `SELECT UserID, Salt, Password FROM Users  WHERE Name = ?;`
 	updateUser       = `UPDATE Users SET Name = ?, Salt = ?, Password = ? WHERE UserID = ?;`
 
+    
 	setUserStats    = `INSERT OR REPLACE INTO UserStats (UserID, Quota, Allocated, Revision) VALUES (?, ?, ?, ?);`
 	getUserStats    = `SELECT Quota, Allocated, Revision FROM UserStats WHERE UserID = ?;`
 	updateUserStats = `UPDATE UserStats SET Allocated = Allocated + (?), Revision = Revision + 1 WHERE UserID = ?;`
 	setUserQuota    = `UPDATE UserStats SET Quota = (?) WHERE UserID = ?;`
 
-	addFileInfo = `INSERT INTO FileInfo (UserID, FileName, IsDir, Perms, LastMod, ChunkCount, FileHash) SELECT ?, ?, ?, ?, ?, ?, ?
-						WHERE NOT EXISTS (SELECT 1 FROM FileInfo WHERE UserID = ? AND FileName = ?);`
-	getFileInfo        = `SELECT UserID, FileName, IsDir, Perms, LastMod, ChunkCount, FileHash FROM FileInfo WHERE FileID = ?;`
-	getFileInfoByName  = `SELECT FileID, IsDir, Perms, LastMod, ChunkCount, FileHash FROM FileInfo WHERE FileName = ? AND UserID = ?;`
-	getFileInfoOwner   = `SELECT UserID  FROM FileInfo WHERE FileID = ?;`
-	getAllUserFiles    = `SELECT FileID, FileName, IsDir, Perms, LastMod, ChunkCount, FileHash FROM FileInfo WHERE UserID = ?;`
-	removeFileInfoByID = `DELETE FROM FileInfo WHERE FileID = ?;`
 
-	getAllFileChunksByID = `SELECT ChunkNum, ChunkHash FROM FileChunks WHERE FileID = ? AND Version = ?;`
-	addFileChunk         = `INSERT OR REPLACE INTO FileChunks (FileID, Version, ChunkNum, ChunkHash, Chunk) 
-							  VALUES (?, ?, ?, ?, ?);`
+	addFileInfo = `INSERT INTO FileInfo (UserID, FileName, IsDir, CurrentVersionID) SELECT ?, ?, ?, ?,
+                        WHERE NOT EXISTS (SELECT 1 FROM FileInfo WHERE UserID = ? AND FileName = ?);`
+	getFileInfo           = `SELECT UserID, FileName, IsDir, CurrentVersionID FROM FileInfo WHERE FileID = ?;`
+	getFileInfoByName     = `SELECT FileID, IsDir FROM FileInfo WHERE FileName = ? AND UserID = ?;`
+	getFileInfoOwner      = `SELECT UserID  FROM FileInfo WHERE FileID = ?;`
+	getAllUserFiles       = `SELECT FileID, FileName, IsDir, CurrentVersionID FROM FileInfo WHERE UserID = ?;`
+	removeFileInfoByID    = `DELETE FROM FileInfo WHERE FileID = ?;`
+	setFileCurrentVersion = `UPDATE FileInfo SET CurrentVersionID = ? WHERE FileID = ?;`
+
+
+	addFileVersion               = `INSERT INTO FileVersion (FileID, VersionNum, Perms, LastMod, ChunkCount, FileHash) SELECT ?, ?, ?, ?, ?, ?;`
+	removeFileVersionsByID       = `DELETE FROM FileVersion WHERE FileID = ?;`
+	getCurrentVersionByFileID = `SELECT VersionID, VersionNum, Perms, LastMod, ChunkCount, FileHash FROM FileVersion WHERE FileID = ?
+                                    ORDER BY VersionNum DESC LIMIT 1;`
+    getCurrentVersionByID = `SELECT VersionNum, Perms, LastMod, ChunkCount, FileHash FROM FileVersion WHERE VersionID = ?;`
+
+
+	getAllFileChunksByID  = `SELECT ChunkNum, ChunkHash FROM FileChunks WHERE FileID = ? AND VersionID = ?;`
+	addFileChunk          = `INSERT OR REPLACE INTO FileChunks (FileID, VersionID, ChunkNum, ChunkHash, Chunk) VALUES (?, ?, ?, ?, ?);`
 	removeAllFileChunks   = `DELETE FROM FileChunks WHERE FileID = ?;`
-	removeFileChunk       = `DELETE FROM FileChunks WHERE FileID = ? AND Version = ? AND ChunkNum = ?;`
-	getFileChunk          = `SELECT ChunkHash, Chunk FROM FileChunks WHERE FileID = ? AND Version = ? AND ChunkNum = ?;`
+	removeFileChunk       = `DELETE FROM FileChunks WHERE FileID = ? AND VersionID = ? AND ChunkNum = ?;`
+	getFileChunk          = `SELECT ChunkHash, Chunk FROM FileChunks WHERE FileID = ? AND VersionID = ? AND ChunkNum = ?;`
 	getFileTotalChunkSize = "SELECT SUM(LENGTH(Chunk)) FROM FileChunks WHERE FileID = ?;"
 
+
 	removeUser = `DELETE FROM FileChunks WHERE FileID IN (SELECT FileID FROM FileInfo WHERE UserID = ?);
-		DELETE FROM FileInfo WHERE UserID = ?;
-		DELETE FROM UserStats WHERE UserID = ?;
-		DELETE FROM Users WHERE UserID = ?;`
+        DELETE FROM FileInfo WHERE UserID = ?;
+        DELETE FROM FileVersion WHERE UserID = ?;
+        DELETE FROM UserStats WHERE UserID = ?;
+        DELETE FROM Users WHERE UserID = ?;`
 )
 
 // FileInfo contains the information stored about a given file for a particular user.
@@ -90,16 +109,18 @@ type FileInfo struct {
 
 // FileVersionInfo contains the version-specific information for a given file.
 type FileVersionInfo struct {
-	VersionID   int
-	Permissions uint32
-	LastMod     int64
-	ChunkCount  int
-	FileHash    string
+	VersionID     int
+	VersionNumber int
+	Permissions   uint32
+	LastMod       int64
+	ChunkCount    int
+	FileHash      string
 }
 
 // FileChunk contains the information stored about a given file chunk.
 type FileChunk struct {
 	FileID      int
+	VersionID   int
 	ChunkNumber int
 	ChunkHash   string
 	Chunk       []byte
@@ -172,6 +193,11 @@ func (s *Storage) CreateTables() error {
 	_, err = s.db.Exec(createFileInfoTable)
 	if err != nil {
 		return fmt.Errorf("failed to create the FILEINFO table: %v", err)
+	}
+
+	_, err = s.db.Exec(createFileVersionTable)
+	if err != nil {
+		return fmt.Errorf("failed to create the FILEVERSION table: %v", err)
 	}
 
 	_, err = s.db.Exec(createFileChunksTable)
@@ -396,6 +422,12 @@ func (s *Storage) RemoveFile(userID, fileID int) error {
 			return fmt.Errorf("failed to remove a file info in the database: %v", err)
 		}
 
+		// remove the file versions
+		_, err = tx.Exec(removeFileVersionsByID, fileID)
+		if err != nil {
+			return fmt.Errorf("failed to remove the file versions in the database: %v", err)
+		}
+
 		// get the total size for all chunks attached to the file id
 		var totalChunkSize int
 		err = tx.QueryRow(getFileTotalChunkSize, fileID).Scan(&totalChunkSize)
@@ -456,36 +488,83 @@ func (s *Storage) RemoveFileInfo(fileID int) error {
 // chunkCount parameter should be the number of chunks required for the size of the file. If the
 // file could not be added an error is returned, otherwise nil on success.
 func (s *Storage) AddFileInfo(userID int, filename string, isDir bool, permissions uint32, lastMod int64, chunkCount int, fileHash string) (*FileInfo, error) {
-	res, err := s.db.Exec(addFileInfo, userID, filename, isDir, permissions, lastMod, chunkCount, fileHash, userID, filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to add a new file info in the database: %v", err)
-	}
-
-	// make sure one row was affected -- if the file was a duplicate, it violates the SQL command
-	// and while an erro wasn't returned above, no rows will be affected.
-	affected, err := res.RowsAffected()
-	if affected != 1 {
-		return nil, fmt.Errorf("failed to add a new file info in the database; no rows were affected (possible duplicate file)")
-	} else if err != nil {
-		return nil, fmt.Errorf("failed to add a new file info in the database: %v", err)
-	}
-
-	insertedID, err := res.LastInsertId()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get the id for the last row inserted while adding a new file info into the database: %v", err)
-	}
-
-	// generate a new UserFileInfo that contains the ID for the file just added to the database
 	fi := new(FileInfo)
-	fi.FileID = int(insertedID)
-	fi.UserID = userID
-	fi.FileName = filename
-	fi.IsDir = isDir
 
-	fi.CurrentVersion.Permissions = permissions
-	fi.CurrentVersion.LastMod = lastMod
-	fi.CurrentVersion.ChunkCount = chunkCount
-	fi.CurrentVersion.FileHash = fileHash
+	const newVersionNumber = 1
+
+	err := s.transact(func(tx *sql.Tx) error {
+		// attempt to first add to the FileInfo table
+		res, err := s.db.Exec(addFileInfo, userID, filename, isDir, newVersionNumber, userID, filename)
+		if err != nil {
+			return fmt.Errorf("failed to add a new file info in the database: %v", err)
+		}
+
+		// make sure one row was affected -- if the file was a duplicate, it violates the SQL command
+		// and while an erro wasn't returned above, no rows will be affected.
+		affected, err := res.RowsAffected()
+		if affected != 1 {
+			return fmt.Errorf("failed to add a new file info in the database; no rows were affected (possible duplicate file)")
+		} else if err != nil {
+			return fmt.Errorf("failed to add a new file info in the database: %v", err)
+		}
+
+		newFileID, err := res.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("failed to get the id for the last row inserted while adding a new file info into the database: %v", err)
+		}
+
+		// now create a new FileVersion entry
+		res, err = s.db.Exec(addFileVersion, newFileID, newVersionNumber, permissions, lastMod, chunkCount, fileHash)
+		if err != nil {
+			return fmt.Errorf("failed to add a new file version in the database: %v", err)
+		}
+
+		// make sure only one row was affected
+		affected, err = res.RowsAffected()
+		if affected != 1 {
+			return fmt.Errorf("failed to add a new file version in the database; no rows were affected (possible duplicate file)")
+		} else if err != nil {
+			return fmt.Errorf("failed to add a new file version in the database: %v", err)
+		}
+
+		newVersionID, err := res.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("failed to get the id for the last row inserted while adding a new file version into the database: %v", err)
+		}
+
+		// update the original new file info object with the versionID just created
+		res, err = s.db.Exec(setFileCurrentVersion, newVersionID, newFileID)
+		if err != nil {
+			return fmt.Errorf("failed to update the new file version in the database: %v", err)
+		}
+
+		affected, err = res.RowsAffected()
+		if affected != 1 {
+			return fmt.Errorf("failed to update the new file version in the database; no rows were affected (possible duplicate file)")
+		} else if err != nil {
+			return fmt.Errorf("failed to update the new file version in the database: %v", err)
+		}
+
+		// generate a new UserFileInfo that contains the ID for the file just added to the database
+		fi.FileID = int(newFileID)
+		fi.UserID = userID
+		fi.FileName = filename
+		fi.IsDir = isDir
+
+		fi.CurrentVersion.VersionID = int(newVersionID)
+		fi.CurrentVersion.VersionNumber = newVersionNumber
+		fi.CurrentVersion.Permissions = permissions
+		fi.CurrentVersion.LastMod = lastMod
+		fi.CurrentVersion.ChunkCount = chunkCount
+		fi.CurrentVersion.FileHash = fileHash
+
+		return nil
+	})
+
+	// if the tx failed, then return here
+	if err != nil {
+		return nil, err
+	}
 
 	return fi, nil
 }
@@ -503,8 +582,7 @@ func (s *Storage) GetAllUserFileInfos(userID int) ([]FileInfo, error) {
 	result := []FileInfo{}
 	for rows.Next() {
 		var fi FileInfo
-		err := rows.Scan(&fi.FileID, &fi.FileName, &fi.IsDir, &fi.CurrentVersion.Permissions,
-			&fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
+		err := rows.Scan(&fi.FileID, &fi.FileName, &fi.IsDir, &fi.CurrentVersion.VersionID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan the next row while processing user file infos: %v", err)
 		}
@@ -513,6 +591,18 @@ func (s *Storage) GetAllUserFileInfos(userID int) ([]FileInfo, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to scan all of the search results for a user's file infos: %v", err)
+	}
+
+	// an early Close() call on the result which should be harmless
+	rows.Close()
+
+	// now that the base of the FileInfo slice is built, iterate over it and pull the current version data
+	for _, fi := range result {
+		err = s.db.QueryRow(getCurrentVersionByFileID, fi.FileID).Scan(&fi.CurrentVersion.VersionID, &fi.CurrentVersion.VersionNumber,
+			&fi.CurrentVersion.Permissions, &fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get the current file version the database: %v", err)
+		}
 	}
 
 	return result, nil
@@ -534,10 +624,17 @@ func (s *Storage) GetFileInfo(userID int, fileID int) (*FileInfo, error) {
 			return fmt.Errorf("user does not own the file id supplied")
 		}
 
-		err = tx.QueryRow(getFileInfo, fileID).Scan(&fi.UserID, &fi.FileName, &fi.IsDir, &fi.CurrentVersion.Permissions,
-			&fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
+		// pull the basic file information
+		err = tx.QueryRow(getFileInfo, fileID).Scan(&fi.UserID, &fi.FileName, &fi.IsDir, &fi.CurrentVersion.VersionID)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to get the current file info the database: %v", err)
+		}
+
+		// pull the current version data
+		err = tx.QueryRow(getCurrentVersionByID, fi.CurrentVersion.VersionID).Scan(&fi.CurrentVersion.VersionNumber
+            &fi.CurrentVersion.Permissions, &fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
+		if err != nil {
+			return fmt.Errorf("failed to get the current file version the database: %v", err)
 		}
 
 		return nil
@@ -553,11 +650,20 @@ func (s *Storage) GetFileInfo(userID int, fileID int) (*FileInfo, error) {
 // by the userID and filename parameters. If this query was unsuccessful an error is returned.
 func (s *Storage) GetFileInfoByName(userID int, filename string) (*FileInfo, error) {
 	fi := new(FileInfo)
-	err := s.db.QueryRow(getFileInfoByName, filename, userID).Scan(&fi.FileID, &fi.IsDir, &fi.CurrentVersion.Permissions,
-		&fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
+
+	// pull the basic file information
+	err := s.db.QueryRow(getFileInfoByName, filename, userID).Scan(&fi.FileID, &fi.IsDir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get the current file info the database: %v", err)
 	}
+
+	// pull the current version data
+	err = s.db.QueryRow(getCurrentVersionByFileID, fi.FileID).Scan(&fi.CurrentVersion.VersionID, &fi.CurrentVersion.VersionNumber,
+        &fi.CurrentVersion.Permissions, &fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get the current file version the database: %v", err)
+	}
+
 	fi.UserID = userID
 	fi.FileName = filename
 	return fi, nil
@@ -565,7 +671,7 @@ func (s *Storage) GetFileInfoByName(userID int, filename string) (*FileInfo, err
 
 // GetFileChunkInfos returns a slice of FileChunks containing all of the chunk
 // information except for the chunk bytes themselves.
-func (s *Storage) GetFileChunkInfos(userID int, fileID int, version int) ([]FileChunk, error) {
+func (s *Storage) GetFileChunkInfos(userID int, fileID int, versionID int) ([]FileChunk, error) {
 	var chunk FileChunk
 	knownChunks := []FileChunk{}
 	err := s.transact(func(tx *sql.Tx) error {
@@ -580,13 +686,14 @@ func (s *Storage) GetFileChunkInfos(userID int, fileID int, version int) ([]File
 		}
 
 		// get all of the file chunks for the file
-		rows, err := tx.Query(getAllFileChunksByID, fileID, version)
+		rows, err := tx.Query(getAllFileChunksByID, fileID, versionID)
 		if err != nil {
 			return fmt.Errorf("failed to get all of the file chunks from the database for fileID %d: %v", fileID, err)
 		}
 		defer rows.Close()
 
 		chunk.FileID = fileID
+		chunk.VersionID = versionID
 		for rows.Next() {
 			err := rows.Scan(&chunk.ChunkNumber, &chunk.ChunkHash)
 			if err != nil {
@@ -609,7 +716,7 @@ func (s *Storage) GetFileChunkInfos(userID int, fileID int, version int) ([]File
 
 // GetMissingChunkNumbersForFile will return a slice of chunk numbers that have
 // not been added for a given file.
-func (s *Storage) GetMissingChunkNumbersForFile(userID int, fileID int, version int) ([]int, error) {
+func (s *Storage) GetMissingChunkNumbersForFile(userID int, fileID int) ([]int, error) {
 	var fi FileInfo
 	knownChunks := []int{}
 	err := s.transact(func(tx *sql.Tx) error {
@@ -624,15 +731,14 @@ func (s *Storage) GetMissingChunkNumbersForFile(userID int, fileID int, version 
 		}
 
 		// get the file information
-		err = tx.QueryRow(getFileInfo, fileID).Scan(&fi.UserID, &fi.FileName, &fi.IsDir, &fi.CurrentVersion.Permissions,
-			&fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
+		err = tx.QueryRow(getFileInfo, fileID).Scan(&fi.UserID, &fi.FileName, &fi.IsDir, &fi.CurrentVersion.VersionID)
 		if err != nil {
 			return err
 		}
 		fi.FileID = fileID
 
 		// get all of the file chunks for the file
-		rows, err := tx.Query(getAllFileChunksByID, fileID, version)
+		rows, err := tx.Query(getAllFileChunksByID, fileID, fi.CurrentVersion.VersionID)
 		if err != nil {
 			return fmt.Errorf("failed to get all of the file chunks from the database for fileID %d: %v", fileID, err)
 		}

@@ -79,6 +79,8 @@ Known Bugs and Limitations
 * Consider a quota for max fileinfo registered so service cannot be DDOS'd 
   by registering infinite files.
 
+* Incrementing a user's revision number only happens in some areas like chunk modification.
+  Consider bumping the revision with new files are added or otherwise changed too.
 
 TODO / Notes
 ------------
