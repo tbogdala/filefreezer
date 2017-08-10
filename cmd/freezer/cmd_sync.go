@@ -163,7 +163,8 @@ func (s *commandState) syncFile(localFilename string, remoteFilepath string) (st
 	// if the local file doesn't exist then download the file from the server if
 	// it is registered there.
 	if _, err := os.Stat(localFilename); os.IsNotExist(err) {
-		dlCount, err := s.syncDownload(remote.FileID, localFilename, remoteFilepath, remote.CurrentVersion.ChunkCount)
+		dlCount, err := s.syncDownload(remote.FileID, remote.CurrentVersion.VersionID, localFilename,
+			remoteFilepath, remote.CurrentVersion.ChunkCount)
 		return syncStatusRemoteNewer, dlCount, err
 	}
 
@@ -181,7 +182,7 @@ func (s *commandState) syncFile(localFilename string, remoteFilepath string) (st
 		if *flagExtraStrict {
 			// now we get a chunk list for the file
 			var remoteChunks models.FileChunksGetResponse
-			target := fmt.Sprintf("%s/api/chunk/%d/%d", s.hostURI, remote.FileID, DEBUG_VERSION_MAGIC)
+			target := fmt.Sprintf("%s/api/chunk/%d/%d", s.hostURI, remote.FileID, remote.CurrentVersion.VersionID)
 			body, err := runAuthRequest(target, "GET", s.authToken, nil)
 			err = json.Unmarshal(body, &remoteChunks)
 			if err != nil {
@@ -229,14 +230,15 @@ func (s *commandState) syncFile(localFilename string, remoteFilepath string) (st
 	}
 
 	if localLastMod < remote.CurrentVersion.LastMod {
-		dlCount, e := s.syncDownload(remote.FileID, localFilename, remoteFilepath, remote.CurrentVersion.ChunkCount)
+		dlCount, e := s.syncDownload(remote.FileID, remote.CurrentVersion.VersionID, localFilename,
+			remoteFilepath, remote.CurrentVersion.ChunkCount)
 		return syncStatusRemoteNewer, dlCount, e
 	}
 
 	// there's been a difference detected in the files, but the mod times were the same, so
 	// we attempt to upload any missing chunks.
 	if len(remote.MissingChunks) > 0 {
-		ulCount, e := s.syncUploadMissing(remote.FileID, localFilename, remoteFilepath, localChunkCount)
+		ulCount, e := s.syncUploadMissing(remote.FileID, remote.CurrentVersion.VersionID, localFilename, remoteFilepath, localChunkCount)
 		return syncStatusMissing, ulCount, e
 	}
 
@@ -245,7 +247,7 @@ func (s *commandState) syncFile(localFilename string, remoteFilepath string) (st
 	return 0, 0, fmt.Errorf("found differences between local (%s) and remote (%s) versions, but this was not reconcilled", localFilename, remoteFilepath)
 }
 
-func (s *commandState) syncUploadMissing(remoteID int, filename string, remoteFilepath string, localChunkCount int) (uploadCount int, e error) {
+func (s *commandState) syncUploadMissing(remoteID int, remoteVersionID int, filename string, remoteFilepath string, localChunkCount int) (uploadCount int, e error) {
 	// upload each chunk
 	err := forEachChunk(int(s.serverCapabilities.ChunkSize), filename, localChunkCount, func(i int, b []byte) (bool, error) {
 		// hash the chunk
@@ -254,7 +256,7 @@ func (s *commandState) syncUploadMissing(remoteID int, filename string, remoteFi
 		hash := hasher.Sum(nil)
 		chunkHash := base64.URLEncoding.EncodeToString(hash)
 
-		target := fmt.Sprintf("%s/api/chunk/%d/%d/%d/%s", s.hostURI, remoteID, DEBUG_VERSION_MAGIC, i, chunkHash)
+		target := fmt.Sprintf("%s/api/chunk/%d/%d/%d/%s", s.hostURI, remoteID, remoteVersionID, i, chunkHash)
 		body, err := runAuthRequest(target, "PUT", s.authToken, b)
 		if err != nil {
 			return false, err
@@ -311,7 +313,17 @@ func (s *commandState) syncUpload(filename string, remoteFilepath string, isDir 
 	if err != nil {
 		return 0, err
 	}
+
+	var getFileInfoResp models.FileGetResponse
+	target = fmt.Sprintf("%s/api/file/%d", s.hostURI, putResp.FileID)
+	body, err = runAuthRequest(target, "GET", s.authToken, nil)
+	err = json.Unmarshal(body, &getFileInfoResp)
+	if err != nil {
+		return 0, err
+	}
+
 	remoteID := putResp.FileID
+	remoteVersionID := getFileInfoResp.CurrentVersion.VersionID
 
 	// upload each chunk
 	err = forEachChunk(int(s.serverCapabilities.ChunkSize), filename, localChunkCount, func(i int, b []byte) (bool, error) {
@@ -321,7 +333,7 @@ func (s *commandState) syncUpload(filename string, remoteFilepath string, isDir 
 		hash := hasher.Sum(nil)
 		chunkHash := base64.URLEncoding.EncodeToString(hash)
 
-		target = fmt.Sprintf("%s/api/chunk/%d/%d/%d/%s", s.hostURI, remoteID, DEBUG_VERSION_MAGIC, i, chunkHash)
+		target = fmt.Sprintf("%s/api/chunk/%d/%d/%d/%s", s.hostURI, remoteID, remoteVersionID, i, chunkHash)
 		body, err = runAuthRequest(target, "PUT", s.authToken, b)
 		if err != nil {
 			return false, err
@@ -346,7 +358,7 @@ func (s *commandState) syncUpload(filename string, remoteFilepath string, isDir 
 	return uploadCount, nil
 }
 
-func (s *commandState) syncDownload(remoteID int, filename string, remoteFilepath string, chunkCount int) (downloadCount int, e error) {
+func (s *commandState) syncDownload(remoteID int, remoteVersionID int, filename string, remoteFilepath string, chunkCount int) (downloadCount int, e error) {
 	localFile, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.ModePerm)
 	if err != nil {
 		return 0, fmt.Errorf("Failed to open local file (%s) for writing: %v", filename, err)
@@ -356,7 +368,7 @@ func (s *commandState) syncDownload(remoteID int, filename string, remoteFilepat
 	// download each chunk and write it out to the file
 	chunksWritten := 0
 	for i := 0; i < chunkCount; i++ {
-		target := fmt.Sprintf("%s/api/chunk/%d/%d/%d", s.hostURI, remoteID, DEBUG_VERSION_MAGIC, i)
+		target := fmt.Sprintf("%s/api/chunk/%d/%d/%d", s.hostURI, remoteID, remoteVersionID, i)
 		body, err := runAuthRequest(target, "GET", s.authToken, nil)
 		if err != nil {
 			return chunksWritten, fmt.Errorf("Failed to get the file chunk #%d for file id%d: %v", i, remoteID, err)

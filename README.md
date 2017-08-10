@@ -103,7 +103,7 @@ TODO / Notes
 
 * work on readability of error messages wrt bubbling up error objects
 
-  
+* condsider bit depth of parameters read in in routes.go (32 vs 64)
 
 Workflows
 ---------

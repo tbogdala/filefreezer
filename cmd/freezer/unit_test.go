@@ -168,11 +168,11 @@ func TestEverything(t *testing.T) {
 	}
 	t.Logf("Calculated hash data for %s ...", filename)
 
-	fileID, err := cmdState.addFile(filename, filename, false, permissions, lastMod, chunkCount, hashString)
+	fileInfo, err := cmdState.addFile(filename, filename, false, permissions, lastMod, chunkCount, hashString)
 	if err != nil {
 		t.Fatalf("Failed to at the file %s: %v", filename, err)
 	}
-	t.Logf("Added file %s (id: %d) ...", filename, fileID)
+	t.Logf("Added file %s (id: %d) ...", filename, fileInfo.FileID)
 
 	// at this point we should have a different revision
 	oldRevision = userStats.Revision
@@ -209,7 +209,7 @@ func TestEverything(t *testing.T) {
 
 	// now we get a chunk list for the file
 	var remoteChunks models.FileChunksGetResponse
-	target := fmt.Sprintf("%s/api/chunk/%d/%d", cmdState.hostURI, fileID, DEBUG_VERSION_MAGIC)
+	target := fmt.Sprintf("%s/api/chunk/%d/%d", cmdState.hostURI, fileInfo.FileID, fileInfo.CurrentVersion.VersionID)
 	body, err := runAuthRequest(target, "GET", cmdState.authToken, nil)
 	err = json.Unmarshal(body, &remoteChunks)
 	if err != nil {
@@ -456,7 +456,7 @@ func TestEverything(t *testing.T) {
 
 	// now use some raw API requests to see if we can get chunks, file infos, user stats
 	for _, fileInfo := range allFiles {
-		target := fmt.Sprintf("%s/api/chunk/%d/%d", cmdState.hostURI, fileInfo.FileID, DEBUG_VERSION_MAGIC)
+		target := fmt.Sprintf("%s/api/chunk/%d/%d", cmdState.hostURI, fileInfo.FileID, fileInfo.CurrentVersion.VersionID)
 		body, err = runAuthRequest(target, "GET", cmdState.authToken, nil)
 		if len(body) > 0 {
 			t.Fatalf("Chunk list obtained for file ID %d that should have been deleted.", fileInfo.FileID)

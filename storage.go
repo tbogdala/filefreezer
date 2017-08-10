@@ -67,17 +67,18 @@ const (
 	addFileInfo = `INSERT INTO FileInfo (UserID, FileName, IsDir, CurrentVersionID) SELECT ?, ?, ?, ?
                         WHERE NOT EXISTS (SELECT 1 FROM FileInfo WHERE UserID = ? AND FileName = ?);`
 	getFileInfo           = `SELECT UserID, FileName, IsDir, CurrentVersionID FROM FileInfo WHERE FileID = ?;`
-	getFileInfoByName     = `SELECT FileID, IsDir FROM FileInfo WHERE FileName = ? AND UserID = ?;`
+	getFileInfoByName     = `SELECT FileID, IsDir, CurrentVersionID FROM FileInfo WHERE FileName = ? AND UserID = ?;`
 	getFileInfoOwner      = `SELECT UserID  FROM FileInfo WHERE FileID = ?;`
 	getAllUserFiles       = `SELECT FileID, FileName, IsDir, CurrentVersionID FROM FileInfo WHERE UserID = ?;`
 	removeFileInfoByID    = `DELETE FROM FileInfo WHERE FileID = ?;`
 	setFileCurrentVersion = `UPDATE FileInfo SET CurrentVersionID = ? WHERE FileID = ?;`
 
-	addFileVersion            = `INSERT INTO FileVersion (FileID, VersionNum, Perms, LastMod, ChunkCount, FileHash) SELECT ?, ?, ?, ?, ?, ?;`
-	removeFileVersionsByID    = `DELETE FROM FileVersion WHERE FileID = ?;`
-	getCurrentVersionByFileID = `SELECT VersionID, VersionNum, Perms, LastMod, ChunkCount, FileHash FROM FileVersion WHERE FileID = ?
-                                    ORDER BY VersionNum DESC LIMIT 1;`
-	getCurrentVersionByID = `SELECT VersionNum, Perms, LastMod, ChunkCount, FileHash FROM FileVersion WHERE VersionID = ?;`
+	addFileVersion         = `INSERT INTO FileVersion (FileID, VersionNum, Perms, LastMod, ChunkCount, FileHash) VALUES (?, ?, ?, ?, ?, ?);`
+	getFileVersionByID     = `SELECT VersionNum, Perms, LastMod, ChunkCount, FileHash FROM FileVersion WHERE VersionID = ?;`
+	removeFileVersionsByID = `DELETE FROM FileVersion WHERE FileID = ?;`
+	//getCurrentVersionByFileID = `SELECT VersionID, VersionNum, Perms, LastMod, ChunkCount, FileHash FROM FileVersion WHERE FileID = ?
+	//                                ORDER BY VersionNum DESC LIMIT 1;`
+	getVersionIDsForFile = `SELECT VersionID, VersionNum FROM FileVersion WHERE FileID = ?;`
 
 	getAllFileChunksByID  = `SELECT ChunkNum, ChunkHash FROM FileChunks WHERE FileID = ? AND VersionID = ?;`
 	addFileChunk          = `INSERT OR REPLACE INTO FileChunks (FileID, VersionID, ChunkNum, ChunkHash, Chunk) VALUES (?, ?, ?, ?, ?);`
@@ -87,8 +88,8 @@ const (
 	getFileTotalChunkSize = "SELECT SUM(LENGTH(Chunk)) FROM FileChunks WHERE FileID = ?;"
 
 	removeUser = `DELETE FROM FileChunks WHERE FileID IN (SELECT FileID FROM FileInfo WHERE UserID = ?);
-        DELETE FROM FileInfo WHERE UserID = ?;
-        DELETE FROM FileVersion WHERE UserID = ?;
+		DELETE FROM FileVersion WHERE FileID IN (SELECT FileID FROM FileInfo WHERE UserID = ?);
+		DELETE FROM FileInfo WHERE UserID = ?;
         DELETE FROM UserStats WHERE UserID = ?;
         DELETE FROM Users WHERE UserID = ?;`
 )
@@ -296,7 +297,7 @@ func (s *Storage) RemoveUser(username string) error {
 		return fmt.Errorf("Failed to find the user in the database: %v", err)
 	}
 
-	_, err = s.db.Exec(removeUser, user.ID, user.ID, user.ID, user.ID)
+	_, err = s.db.Exec(removeUser, user.ID, user.ID, user.ID, user.ID, user.ID)
 	if err != nil {
 		return fmt.Errorf("failed to remove the user %s (id: %d): %v", user.Name, user.ID, err)
 	}
@@ -574,7 +575,7 @@ func (s *Storage) GetAllUserFileInfos(userID int) ([]FileInfo, error) {
 	defer rows.Close()
 
 	// iterate over the returned rows to create a new slice of file info objects
-	result := []FileInfo{}
+	allFileInfos := []FileInfo{}
 	for rows.Next() {
 		var fi FileInfo
 		err := rows.Scan(&fi.FileID, &fi.FileName, &fi.IsDir, &fi.CurrentVersion.VersionID)
@@ -582,7 +583,7 @@ func (s *Storage) GetAllUserFileInfos(userID int) ([]FileInfo, error) {
 			return nil, fmt.Errorf("failed to scan the next row while processing user file infos: %v", err)
 		}
 		fi.UserID = userID
-		result = append(result, fi)
+		allFileInfos = append(allFileInfos, fi)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to scan all of the search results for a user's file infos: %v", err)
@@ -592,12 +593,15 @@ func (s *Storage) GetAllUserFileInfos(userID int) ([]FileInfo, error) {
 	rows.Close()
 
 	// now that the base of the FileInfo slice is built, iterate over it and pull the current version data
-	for _, fi := range result {
-		err = s.db.QueryRow(getCurrentVersionByFileID, fi.FileID).Scan(&fi.CurrentVersion.VersionID, &fi.CurrentVersion.VersionNumber,
+	result := make([]FileInfo, 0, len(allFileInfos))
+	for _, fi := range allFileInfos {
+		err = s.db.QueryRow(getFileVersionByID, fi.CurrentVersion.VersionID).Scan(&fi.CurrentVersion.VersionNumber,
 			&fi.CurrentVersion.Permissions, &fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get the current file version the database: %v", err)
 		}
+
+		result = append(result, fi)
 	}
 
 	return result, nil
@@ -626,7 +630,7 @@ func (s *Storage) GetFileInfo(userID int, fileID int) (*FileInfo, error) {
 		}
 
 		// pull the current version data
-		err = tx.QueryRow(getCurrentVersionByID, fi.CurrentVersion.VersionID).Scan(&fi.CurrentVersion.VersionNumber,
+		err = tx.QueryRow(getFileVersionByID, fi.CurrentVersion.VersionID).Scan(&fi.CurrentVersion.VersionNumber,
 			&fi.CurrentVersion.Permissions, &fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
 		if err != nil {
 			return fmt.Errorf("failed to get the current file version the database: %v", err)
@@ -647,21 +651,45 @@ func (s *Storage) GetFileInfoByName(userID int, filename string) (*FileInfo, err
 	fi := new(FileInfo)
 
 	// pull the basic file information
-	err := s.db.QueryRow(getFileInfoByName, filename, userID).Scan(&fi.FileID, &fi.IsDir)
+	err := s.db.QueryRow(getFileInfoByName, filename, userID).Scan(&fi.FileID, &fi.IsDir, &fi.CurrentVersion.VersionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get the current file info the database: %v", err)
 	}
+	fi.FileName = filename
+	fi.UserID = userID
 
 	// pull the current version data
-	err = s.db.QueryRow(getCurrentVersionByFileID, fi.FileID).Scan(&fi.CurrentVersion.VersionID, &fi.CurrentVersion.VersionNumber,
+	err = s.db.QueryRow(getFileVersionByID, fi.CurrentVersion.VersionID).Scan(&fi.CurrentVersion.VersionNumber,
 		&fi.CurrentVersion.Permissions, &fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get the current file version the database: %v", err)
 	}
 
-	fi.UserID = userID
-	fi.FileName = filename
 	return fi, nil
+}
+
+// GetFileVersions will return a slice of version IDs and a matching version number slice for
+// a given file ID.
+func (s *Storage) GetFileVersions(fileID int) (versionIDs []int, versionNums []int, err error) {
+	// pull the current version data
+	rows, err := s.db.Query(getVersionIDsForFile, fileID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get the file versions for a given file id (%d): %v", fileID, err)
+	}
+	defer rows.Close()
+
+	var versionID int
+	var versionNumber int
+	for rows.Next() {
+		err := rows.Scan(&versionID, &versionNumber)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to scan the next row while processing files versions for fileID %d: %v", fileID, err)
+		}
+		versionIDs = append(versionIDs, versionID)
+		versionNums = append(versionNums, versionNumber)
+	}
+
+	return versionIDs, versionNums, nil
 }
 
 // GetFileChunkInfos returns a slice of FileChunks containing all of the chunk
@@ -731,6 +759,13 @@ func (s *Storage) GetMissingChunkNumbersForFile(userID int, fileID int) ([]int, 
 			return err
 		}
 		fi.FileID = fileID
+
+		// pull the current version data to get the correct chunk count for the current version
+		err = s.db.QueryRow(getFileVersionByID, fi.CurrentVersion.VersionID).Scan(&fi.CurrentVersion.VersionNumber,
+			&fi.CurrentVersion.Permissions, &fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
+		if err != nil {
+			return fmt.Errorf("failed to get the current file version the database: %v", err)
+		}
 
 		// get all of the file chunks for the file
 		rows, err := tx.Query(getAllFileChunksByID, fileID, fi.CurrentVersion.VersionID)

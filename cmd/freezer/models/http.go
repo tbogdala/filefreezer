@@ -64,7 +64,7 @@ type FileChunkGetResponse struct {
 // FilePutResponse is the JSON serializable response given by the
 // /api/files PUT handlder.
 type FilePutResponse struct {
-	FileID int
+	filefreezer.FileInfo
 }
 
 // FilePutRequest is the JSON serializable request object sent to the
