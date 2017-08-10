@@ -33,6 +33,9 @@ func InitRoutes(state *serverState) *mux.Router {
 	// handles registering a file to a user
 	r.Handle("/api/files", authenticateToken(state, handlePutFile(state))).Methods("POST")
 
+	// handles registering a new file version for a given file id
+	r.Handle("/api/file/{fileid:[0-9]+}/version", authenticateToken(state, handleNewFileVersion(state))).Methods("POST")
+
 	// returns a file information response with missing chunk list
 	r.Handle("/api/file/{fileid:[0-9]+}", authenticateToken(state, handleGetFile(state))).Methods("GET")
 
@@ -189,6 +192,58 @@ func handleGetFileByName(state *serverState) http.HandlerFunc {
 		writeJSONResponse(w, &models.FileGetResponse{
 			FileInfo:      *fi,
 			MissingChunks: missingChunks,
+		})
+	}
+}
+
+func handleNewFileVersion(state *serverState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
+		if userCredsI == nil {
+			http.Error(w, "Failed to get the user credentials.", http.StatusUnauthorized)
+			return
+		}
+		userCreds := userCredsI.(*userCredentialsContext)
+
+		// deserialize the JSON object that should be in the request body
+		var req models.NewFileVersionRequest
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read the request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		err = json.Unmarshal(body, &req)
+		if err != nil {
+			http.Error(w, "Failed to parse the request as a JSON object: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// pull the file id from the URI matched by the mux
+		vars := mux.Vars(r)
+		fileID, err := strconv.ParseInt(vars["fileid"], 10, 32)
+		if err != nil {
+			http.Error(w, "A valid integer was not used for the file id in the URI.", http.StatusBadRequest)
+			return
+		}
+
+		// pull down the fileinfo object for a file ID
+		fi, err := state.Storage.GetFileInfo(userCreds.ID, int(fileID))
+		if err != nil {
+			http.Error(w, "Failed to get file for the user.", http.StatusNotFound)
+			return
+		}
+
+		// create new file version
+		fi, err = state.Storage.TagNewFileVersion(userCreds.ID, int(fileID), req.Permissions, req.LastMod, req.ChunkCount, req.FileHash)
+		if err != nil {
+			http.Error(w, "Failed to tag a new version of the file for the user: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		writeJSONResponse(w, &models.NewFileVersionResponse{
+			FileInfo: *fi,
+			Status:   true,
 		})
 	}
 }

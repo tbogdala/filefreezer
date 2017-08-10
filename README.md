@@ -55,17 +55,17 @@ Start up a server in a terminal for a database called `freezer.db`:
 ```bash
 cd cmd/freezer
 go build
-./freezer adduser -u=admin -p=1234
+./freezer adduser -u admin -p 1234
 ./freezer serve "127.0.0.1:8080"
 ```
 
 With the server running you can now execute commands, such as:
 
 ```bash
-./freezer -u=admin -p=1234 userstats http://127.0.0.1:8080
-./freezer -u=admin -p=1234 getfiles http://127.0.0.1:8080
-./freezer -u=admin -p=1234 sync http://127.0.0.1:8080 .bashrc /backupcfg
-./freezer -u=admin -p=1234 syncdir http://127.0.0.1:8080 ~/Downloads /data
+./freezer -u admin -p 1234 userstats http://127.0.0.1:8080
+./freezer -u admin -p 1234 getfiles http://127.0.0.1:8080
+./freezer -u admin -p 1234 sync http://127.0.0.1:8080 .bashrc /backupcfg
+./freezer -u admin -p 1234 syncdir http://127.0.0.1:8080 ~/Downloads /data
 ```
 
 Known Bugs and Limitations
@@ -82,9 +82,14 @@ Known Bugs and Limitations
 * Incrementing a user's revision number only happens in some areas like chunk modification.
   Consider bumping the revision with new files are added or otherwise changed too.
 
+* userid is taken on some Storage methods, but not all, for checking correct user is accessing data
+
+* cli flag to sync against a particular version
+
+* cli command to view a list of versions
+
 TODO / Notes
 ------------
-
 
 * Inspired from a blog post about Dropbox:
   https://blogs.dropbox.com/tech/2014/07/streaming-file-synchronization/

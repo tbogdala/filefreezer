@@ -37,6 +37,22 @@ type FileGetResponse struct {
 	MissingChunks []int
 }
 
+// NewFileVersionRequest is the JSON serializable request object sent to the
+// /api/file/{fileid}/version POST handler.
+type NewFileVersionRequest struct {
+	Permissions uint32
+	LastMod     int64
+	ChunkCount  int
+	FileHash    string
+}
+
+// NewFileVersionResponse is the  JSON serializable response given by the
+// /api/file/{fileid}/version POST handler.
+type NewFileVersionResponse struct {
+	filefreezer.FileInfo
+	Status bool
+}
+
 // FileGetByNameRequest is the JSON structure to be sent to the
 // /api/file/name GET handler.
 type FileGetByNameRequest struct {
@@ -44,19 +60,19 @@ type FileGetByNameRequest struct {
 }
 
 // FileChunkPutResponse is the JSON serializable response given by the
-// /api/chunk/{id}/{chunknum} PUT handlder.
+// /api/chunk/{id}/{versionID}/{chunknum} PUT handlder.
 type FileChunkPutResponse struct {
 	Status bool
 }
 
 // FileChunksGetResponse is the JSON serializable response given by the
-// /api/chunk/{fileid}/ GET handlder.
+// /api/chunk/{fileid}/{versionID}/ GET handlder.
 type FileChunksGetResponse struct {
 	Chunks []filefreezer.FileChunk
 }
 
 // FileChunkGetResponse is the JSON serializable response given by the
-// /api/chunk/{fileid}/{chunknumber} GET handlder.
+// /api/chunk/{fileid}/{versionID}/{chunknumber} GET handlder.
 type FileChunkGetResponse struct {
 	Chunk filefreezer.FileChunk
 }

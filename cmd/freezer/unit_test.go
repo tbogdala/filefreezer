@@ -254,8 +254,8 @@ func TestEverything(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get the user stats: %v", err)
 	}
-	if userStats.Allocated != oldAllocation {
-		t.Fatalf("Allocation counts changed for syncing a file of the same size.")
+	if userStats.Allocated == oldAllocation {
+		t.Fatalf("Allocation counts should change for syncing a file of the same size but a different version.")
 	}
 	if userStats.Revision <= oldRevision {
 		t.Fatalf("Revision should have changed after regenerating a file.")

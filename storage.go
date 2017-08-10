@@ -76,9 +76,7 @@ const (
 	addFileVersion         = `INSERT INTO FileVersion (FileID, VersionNum, Perms, LastMod, ChunkCount, FileHash) VALUES (?, ?, ?, ?, ?, ?);`
 	getFileVersionByID     = `SELECT VersionNum, Perms, LastMod, ChunkCount, FileHash FROM FileVersion WHERE VersionID = ?;`
 	removeFileVersionsByID = `DELETE FROM FileVersion WHERE FileID = ?;`
-	//getCurrentVersionByFileID = `SELECT VersionID, VersionNum, Perms, LastMod, ChunkCount, FileHash FROM FileVersion WHERE FileID = ?
-	//                                ORDER BY VersionNum DESC LIMIT 1;`
-	getVersionIDsForFile = `SELECT VersionID, VersionNum FROM FileVersion WHERE FileID = ?;`
+	getVersionIDsForFile   = `SELECT VersionID, VersionNum FROM FileVersion WHERE FileID = ?;`
 
 	getAllFileChunksByID  = `SELECT ChunkNum, ChunkHash FROM FileChunks WHERE FileID = ? AND VersionID = ?;`
 	addFileChunk          = `INSERT OR REPLACE INTO FileChunks (FileID, VersionID, ChunkNum, ChunkHash, Chunk) VALUES (?, ?, ?, ?, ?);`
@@ -690,6 +688,89 @@ func (s *Storage) GetFileVersions(fileID int) (versionIDs []int, versionNums []i
 	}
 
 	return versionIDs, versionNums, nil
+}
+
+// TagNewFileVersion creates a new version of a given file and returns the new version ID
+// as well as the incremented file-local version number.
+func (s *Storage) TagNewFileVersion(userID int, fileID int, permissions uint32, lastMod int64, chunkCount int, fileHash string) (*FileInfo, error) {
+	fi := new(FileInfo)
+	err := s.transact(func(tx *sql.Tx) error {
+		// check to make sure the user owns the file id
+		var owningUserID int
+		err := tx.QueryRow(getFileInfoOwner, fileID).Scan(&owningUserID)
+		if err != nil {
+			return fmt.Errorf("failed to get the owning user id for a given file: %v", err)
+		}
+		if owningUserID != userID {
+			return fmt.Errorf("user does not own the file id supplied")
+		}
+
+		// get the file information
+		fi.FileID = fileID
+		err = tx.QueryRow(getFileInfo, fi.FileID).Scan(&fi.UserID, &fi.FileName, &fi.IsDir, &fi.CurrentVersion.VersionID)
+		if err != nil {
+			return err
+		}
+
+		// pull the current version data to get the correct chunk count for the current version
+		err = tx.QueryRow(getFileVersionByID, fi.CurrentVersion.VersionID).Scan(&fi.CurrentVersion.VersionNumber,
+			&fi.CurrentVersion.Permissions, &fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
+		if err != nil {
+			return fmt.Errorf("failed to get the current file version the database: %v", err)
+		}
+
+		// increment the file-local version number
+		fi.CurrentVersion.VersionNumber++
+
+		// force-update the current version object to match the parameters
+		fi.CurrentVersion.Permissions = permissions
+		fi.CurrentVersion.LastMod = lastMod
+		fi.CurrentVersion.ChunkCount = chunkCount
+		fi.CurrentVersion.FileHash = fileHash
+
+		// now create a new FileVersion entry
+		res, err := tx.Exec(addFileVersion, fi.FileID, fi.CurrentVersion.VersionNumber, fi.CurrentVersion.Permissions,
+			fi.CurrentVersion.LastMod, fi.CurrentVersion.ChunkCount, fi.CurrentVersion.FileHash)
+		if err != nil {
+			return fmt.Errorf("failed to add a new file version in the database: %v", err)
+		}
+
+		// make sure only one row was affected
+		affected, err := res.RowsAffected()
+		if affected != 1 {
+			return fmt.Errorf("failed to add a new file version in the database; no rows were affected (possible duplicate file)")
+		} else if err != nil {
+			return fmt.Errorf("failed to add a new file version in the database: %v", err)
+		}
+
+		newVersionID64, err := res.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("failed to get the id for the last row inserted while adding a new file version into the database: %v", err)
+		}
+		fi.CurrentVersion.VersionID = int(newVersionID64)
+
+		// update the original file info object with the versionID just created
+		res, err = tx.Exec(setFileCurrentVersion, fi.CurrentVersion.VersionID, fi.FileID)
+		if err != nil {
+			return fmt.Errorf("failed to update the file version (%d) for the file id (%d) in the database: %v",
+				fi.CurrentVersion.VersionID, fi.FileID, err)
+		}
+
+		affected, err = res.RowsAffected()
+		if affected != 1 {
+			return fmt.Errorf("failed to update the new file version in the database; no rows were affected (possible duplicate file)")
+		} else if err != nil {
+			return fmt.Errorf("failed to update the new file version in the database: %v", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return fi, nil
 }
 
 // GetFileChunkInfos returns a slice of FileChunks containing all of the chunk

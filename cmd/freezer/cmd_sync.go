@@ -146,7 +146,7 @@ func (s *commandState) syncFile(localFilename string, remoteFilepath string) (st
 		if err != nil {
 			return syncStatusMissing, 0, fmt.Errorf("Failed to calculate the file hash data for %s: %v", localFilename, err)
 		}
-		ulCount, err := s.syncUpload(localFilename, remoteFilepath, false, localPerms, localLastMod, localChunkCount, localHash)
+		ulCount, err := s.syncUploadNew(localFilename, remoteFilepath, false, localPerms, localLastMod, localChunkCount, localHash)
 		if err != nil {
 			return syncStatusMissing, ulCount, fmt.Errorf("Failed to upload the file to the server %s: %v", s.hostURI, err)
 		}
@@ -281,19 +281,60 @@ func (s *commandState) syncUploadMissing(remoteID int, remoteVersionID int, file
 }
 
 func (s *commandState) syncUploadNewer(remoteFileID int, filename string, remoteFilepath string, isDir bool, localPermissions uint32, localLastMod int64, localChunkCount int, localHash string) (uploadCount int, e error) {
-	// make sure to delete the remote file
-	target := fmt.Sprintf("%s/api/file/%d", s.hostURI, remoteFileID)
-	_, err := runAuthRequest(target, "DELETE", s.authToken, nil)
+	// tag a new version for the file
+	var postReq models.NewFileVersionRequest
+	postReq.LastMod = localLastMod
+	postReq.Permissions = localPermissions
+	postReq.ChunkCount = localChunkCount
+	postReq.FileHash = localHash
+	target := fmt.Sprintf("%s/api/file/%d/version", s.hostURI, remoteFileID)
+	body, err := runAuthRequest(target, "POST", s.authToken, postReq)
 	if err != nil {
-		return 0, fmt.Errorf("Failed to remove the file %d: %v", remoteFileID, err)
+		return 0, fmt.Errorf("Failed to tag a new version for the file %d: %v", remoteFileID, err)
 	}
-	log.Printf("%s XXX deleted remote", filename)
 
-	// now upload the local file
-	return s.syncUpload(filename, remoteFilepath, isDir, localPermissions, localLastMod, localChunkCount, localHash)
+	var postResp models.NewFileVersionResponse
+	err = json.Unmarshal(body, &postResp)
+	if err != nil {
+		return 0, fmt.Errorf("Failed to read the response for tagging a new version for the file %d: %v", remoteFileID, err)
+	}
+
+	fi := &postResp.FileInfo
+
+	// upload each chunk
+	err = forEachChunk(int(s.serverCapabilities.ChunkSize), filename, localChunkCount, func(i int, b []byte) (bool, error) {
+		// hash the chunk
+		hasher := sha1.New()
+		hasher.Write(b)
+		hash := hasher.Sum(nil)
+		chunkHash := base64.URLEncoding.EncodeToString(hash)
+
+		target = fmt.Sprintf("%s/api/chunk/%d/%d/%d/%s", s.hostURI, fi.FileID, fi.CurrentVersion.VersionID, i, chunkHash)
+		body, err = runAuthRequest(target, "PUT", s.authToken, b)
+		if err != nil {
+			return false, err
+		}
+
+		var resp models.FileChunkPutResponse
+		err = json.Unmarshal(body, &resp)
+		if err != nil || resp.Status == false {
+			return false, fmt.Errorf("Failed to upload the chunk to the server: %v", err)
+		}
+
+		log.Printf("%s >>> %d / %d", remoteFilepath, i+1, localChunkCount)
+		uploadCount++
+
+		return true, nil
+	})
+
+	if err != nil {
+		return uploadCount, fmt.Errorf("Failed to upload the local file chunk for %s: %v", filename, err)
+	}
+
+	return uploadCount, nil
 }
 
-func (s *commandState) syncUpload(filename string, remoteFilepath string, isDir bool, localPermissions uint32, localLastMod int64, localChunkCount int, localHash string) (uploadCount int, e error) {
+func (s *commandState) syncUploadNew(filename string, remoteFilepath string, isDir bool, localPermissions uint32, localLastMod int64, localChunkCount int, localHash string) (uploadCount int, e error) {
 	// establish a new file on the remote freezer
 	var putReq models.FilePutRequest
 	putReq.FileName = remoteFilepath

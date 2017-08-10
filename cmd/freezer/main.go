@@ -180,12 +180,12 @@ func main() {
 			log.Fatalf("Failed to calculate the required data for the file %s: %v", filepath, err)
 		}
 
-		fileID, err := cmdState.addFile(filepath, remoteTarget, false, permissions, lastMod, chunkCount, hashString)
+		fileInfo, err := cmdState.addFile(filepath, remoteTarget, false, permissions, lastMod, chunkCount, hashString)
 		if err != nil {
 			log.Fatalf("Failed to register the file on the server %s: %v", *argAddFileHost, err)
 		}
 
-		log.Printf("File added (id: %d): %s\n", fileID, filepath)
+		log.Printf("File added (FileId: %d | VersionID: %d): %s\n", fileInfo.FileID, fileInfo.CurrentVersion.VersionID, filepath)
 
 	case cmdRmFile.FullCommand():
 		cmdState := newCommandState()
@@ -256,43 +256,3 @@ func main() {
 
 	}
 }
-
-/*
-// fileHashData encapsulates return data for file hash calculation.
-type fileHashData struct {
-	Hash        string
-	IsDir       bool
-	Permissions uint32
-	LastMod     int64
-	ChunkCount  int
-}
-
-// calcFileHashInfo calculates the file hash as well as pulling useful information such as
-// last modified time and chunk count required.
-func calcFileHashInfo(maxChunkSize int64, filename string) (*fileHashData, error) {
-	data := new(fileHashData)
-
-	fileInfo, err := os.Stat(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to stat the local file (%s) for the test", filename)
-	}
-
-	data.LastMod = fileInfo.ModTime().UTC().Unix()
-
-	// calculate the chunk count required for the file size
-	fileSize := fileInfo.Size()
-	data.ChunkCount = int((fileSize - (fileSize % maxChunkSize) + maxChunkSize) / maxChunkSize)
-
-	// generate a hash for the test file
-	hasher := sha1.New()
-	fileBytes, err := ioutil.ReadFile(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create a file byte array for the hashing operation: %v", err)
-	}
-	hasher.Write(fileBytes)
-	hash := hasher.Sum(nil)
-	data.Hash = base64.URLEncoding.EncodeToString(hash)
-
-	return data, nil
-}
-*/
