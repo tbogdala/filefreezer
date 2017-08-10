@@ -59,14 +59,12 @@ const (
 	getUser          = `SELECT UserID, Salt, Password FROM Users  WHERE Name = ?;`
 	updateUser       = `UPDATE Users SET Name = ?, Salt = ?, Password = ? WHERE UserID = ?;`
 
-
 	setUserStats    = `INSERT OR REPLACE INTO UserStats (UserID, Quota, Allocated, Revision) VALUES (?, ?, ?, ?);`
 	getUserStats    = `SELECT Quota, Allocated, Revision FROM UserStats WHERE UserID = ?;`
 	updateUserStats = `UPDATE UserStats SET Allocated = Allocated + (?), Revision = Revision + 1 WHERE UserID = ?;`
 	setUserQuota    = `UPDATE UserStats SET Quota = (?) WHERE UserID = ?;`
 
-
-	addFileInfo = `INSERT INTO FileInfo (UserID, FileName, IsDir, CurrentVersionID) SELECT ?, ?, ?, ?,
+	addFileInfo = `INSERT INTO FileInfo (UserID, FileName, IsDir, CurrentVersionID) SELECT ?, ?, ?, ?
                         WHERE NOT EXISTS (SELECT 1 FROM FileInfo WHERE UserID = ? AND FileName = ?);`
 	getFileInfo           = `SELECT UserID, FileName, IsDir, CurrentVersionID FROM FileInfo WHERE FileID = ?;`
 	getFileInfoByName     = `SELECT FileID, IsDir FROM FileInfo WHERE FileName = ? AND UserID = ?;`
@@ -75,13 +73,11 @@ const (
 	removeFileInfoByID    = `DELETE FROM FileInfo WHERE FileID = ?;`
 	setFileCurrentVersion = `UPDATE FileInfo SET CurrentVersionID = ? WHERE FileID = ?;`
 
-
-	addFileVersion               = `INSERT INTO FileVersion (FileID, VersionNum, Perms, LastMod, ChunkCount, FileHash) SELECT ?, ?, ?, ?, ?, ?;`
-	removeFileVersionsByID       = `DELETE FROM FileVersion WHERE FileID = ?;`
+	addFileVersion            = `INSERT INTO FileVersion (FileID, VersionNum, Perms, LastMod, ChunkCount, FileHash) SELECT ?, ?, ?, ?, ?, ?;`
+	removeFileVersionsByID    = `DELETE FROM FileVersion WHERE FileID = ?;`
 	getCurrentVersionByFileID = `SELECT VersionID, VersionNum, Perms, LastMod, ChunkCount, FileHash FROM FileVersion WHERE FileID = ?
                                     ORDER BY VersionNum DESC LIMIT 1;`
-    getCurrentVersionByID = `SELECT VersionNum, Perms, LastMod, ChunkCount, FileHash FROM FileVersion WHERE VersionID = ?;`
-
+	getCurrentVersionByID = `SELECT VersionNum, Perms, LastMod, ChunkCount, FileHash FROM FileVersion WHERE VersionID = ?;`
 
 	getAllFileChunksByID  = `SELECT ChunkNum, ChunkHash FROM FileChunks WHERE FileID = ? AND VersionID = ?;`
 	addFileChunk          = `INSERT OR REPLACE INTO FileChunks (FileID, VersionID, ChunkNum, ChunkHash, Chunk) VALUES (?, ?, ?, ?, ?);`
@@ -89,7 +85,6 @@ const (
 	removeFileChunk       = `DELETE FROM FileChunks WHERE FileID = ? AND VersionID = ? AND ChunkNum = ?;`
 	getFileChunk          = `SELECT ChunkHash, Chunk FROM FileChunks WHERE FileID = ? AND VersionID = ? AND ChunkNum = ?;`
 	getFileTotalChunkSize = "SELECT SUM(LENGTH(Chunk)) FROM FileChunks WHERE FileID = ?;"
-
 
 	removeUser = `DELETE FROM FileChunks WHERE FileID IN (SELECT FileID FROM FileInfo WHERE UserID = ?);
         DELETE FROM FileInfo WHERE UserID = ?;
@@ -505,7 +500,7 @@ func (s *Storage) AddFileInfo(userID int, filename string, isDir bool, permissio
 		if affected != 1 {
 			return fmt.Errorf("failed to add a new file info in the database; no rows were affected (possible duplicate file)")
 		} else if err != nil {
-			return fmt.Errorf("failed to add a new file info in the database: %v", err)
+			return fmt.Errorf("failed to add a new file info in the database; error getting rows affected: %v", err)
 		}
 
 		newFileID, err := res.LastInsertId()
@@ -631,8 +626,8 @@ func (s *Storage) GetFileInfo(userID int, fileID int) (*FileInfo, error) {
 		}
 
 		// pull the current version data
-		err = tx.QueryRow(getCurrentVersionByID, fi.CurrentVersion.VersionID).Scan(&fi.CurrentVersion.VersionNumber
-            &fi.CurrentVersion.Permissions, &fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
+		err = tx.QueryRow(getCurrentVersionByID, fi.CurrentVersion.VersionID).Scan(&fi.CurrentVersion.VersionNumber,
+			&fi.CurrentVersion.Permissions, &fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
 		if err != nil {
 			return fmt.Errorf("failed to get the current file version the database: %v", err)
 		}
@@ -659,7 +654,7 @@ func (s *Storage) GetFileInfoByName(userID int, filename string) (*FileInfo, err
 
 	// pull the current version data
 	err = s.db.QueryRow(getCurrentVersionByFileID, fi.FileID).Scan(&fi.CurrentVersion.VersionID, &fi.CurrentVersion.VersionNumber,
-        &fi.CurrentVersion.Permissions, &fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
+		&fi.CurrentVersion.Permissions, &fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get the current file version the database: %v", err)
 	}
@@ -842,6 +837,7 @@ func (s *Storage) AddFileChunk(userID int, fileID int, versionID int, chunkNumbe
 		}
 
 		newChunk.FileID = fileID
+		newChunk.VersionID = versionID
 		newChunk.ChunkNumber = chunkNumber
 		newChunk.ChunkHash = chunkHash
 		newChunk.Chunk = chunk
@@ -883,7 +879,7 @@ func (s *Storage) RemoveFileChunk(userID int, fileID int, versionID int, chunkNu
 		allocationCount := len(chunk)
 
 		// remove the chunk from the table
-		res, err := tx.Exec(removeFileChunk, fileID, version, chunkNumber)
+		res, err := tx.Exec(removeFileChunk, fileID, versionID, chunkNumber)
 		if err != nil {
 			return fmt.Errorf("failed to remove the file chunk in the database: %v", err)
 		}
@@ -922,12 +918,13 @@ func (s *Storage) RemoveFileChunk(userID int, fileID int, versionID int, chunkNu
 
 // GetFileChunk retrieves a file chunk from storage and returns it. An error value
 // is returned on failure.
-func (s *Storage) GetFileChunk(fileID int, chunkNumber int, version int) (fc *FileChunk, e error) {
+func (s *Storage) GetFileChunk(fileID int, chunkNumber int, versionID int) (fc *FileChunk, e error) {
 	fc = new(FileChunk)
 	fc.FileID = fileID
+	fc.VersionID = versionID
 	fc.ChunkNumber = chunkNumber
 
-	e = s.db.QueryRow(getFileChunk, fileID, version, chunkNumber).Scan(&fc.ChunkHash, &fc.Chunk)
+	e = s.db.QueryRow(getFileChunk, fileID, versionID, chunkNumber).Scan(&fc.ChunkHash, &fc.Chunk)
 	return
 }
 
