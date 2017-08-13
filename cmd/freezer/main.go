@@ -18,7 +18,7 @@ import (
 
 // User kingpin to define a set of commands and flags for the application.
 var (
-	appFlags           = kingpin.New("freezer", "A web application server for FileFreezer.")
+	appFlags           = kingpin.New("freezer", "A command-line interface to filefreezer able to act as client or server.")
 	flagDatabasePath   = appFlags.Flag("db", "The database path.").Default("file:freezer.db").String()
 	flagPublicKeyPath  = appFlags.Flag("pub", "The file path to the public key.").Default("freezer.rsa.pub").String()
 	flagPrivateKeyPath = appFlags.Flag("priv", "The file path to the private key.").Default("freezer.rsa").String()
@@ -104,6 +104,11 @@ func interactiveGetPassword() string {
 }
 
 func main() {
+	fmt.Println("Filefreezer Copyright (C) 2017 by Timothy Bogdala <tdb@animal-machine.com>")
+	fmt.Println("This program comes with ABSOLUTELY NO WARRANTY. This is free software")
+	fmt.Println("and you are welcome to redistribute it under certain conditions.")
+	fmt.Println("")
+
 	switch kingpin.MustParse(appFlags.Parse(os.Args[1:])) {
 	case cmdServe.FullCommand():
 		// setup a new server state or exit out on failure
