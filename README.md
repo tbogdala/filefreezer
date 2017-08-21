@@ -65,7 +65,7 @@ With the server running you can now execute commands, such as:
 ./freezer -u admin -p 1234 -h http://127.0.0.1:8080 userstats
 ./freezer -u admin -p 1234 -h http://127.0.0.1:8080 getfiles
 ./freezer -u admin -p 1234 -h http://127.0.0.1:8080 sync .bashrc /backupcfg
-./freezer -u admin -p 1234 -h http://127.0.0.1:8080 syncdir ~/Downloads /data
+./freezer -u admin -p 1234 -h http://127.0.0.1:8080 syncdir~/Downloads /data
 ```
 
 Known Bugs and Limitations
@@ -83,12 +83,11 @@ Known Bugs and Limitations
   Consider bumping the revision with new files are added or otherwise changed too.
 
 * userid is taken on some Storage methods, but not all, for checking correct user is accessing data
-+
+
 * cli flag to sync against a particular version
 
-* cli command to view a list of versions
-
-
+* starting a remote sync target name with '/' in win32/msys2 attempts to autocomplete
+  the string as a path and not give the desired results.
 
 TODO / Notes
 ------------

@@ -5,6 +5,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"log"
 	"os"
@@ -172,8 +173,23 @@ func main() {
 			log.Fatalf("Failed to get all of the files for the user %s from the storage server %s: %v", username, host, err)
 		}
 
-		// TODO: Better formmating
-		log.Printf("All files: %v", allFiles)
+		log.Printf("Registered files for %s:\n", username)
+		log.Println(strings.Repeat("=", 22+len(username)))
+		log.Println("FileID   | VerNum   | Flags    | Filename")
+		log.Println(strings.Repeat("-", 41))
+
+		var builder bytes.Buffer
+		for _, fi := range allFiles {
+			builder.Reset()
+			builder.WriteString(fmt.Sprintf("%08d | %08d | ", fi.FileID, fi.CurrentVersion.VersionNumber))
+			if fi.IsDir {
+				builder.WriteString("D        | ")
+			} else {
+				builder.WriteString("F        | ")
+			}
+			builder.WriteString(fmt.Sprintf("%s", fi.FileName))
+			log.Println(builder.String())
+		}
 
 	case cmdGetFileVersions.FullCommand():
 		cmdState := newCommandState()
