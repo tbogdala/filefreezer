@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/tbogdala/filefreezer"
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
 )
 
@@ -35,7 +36,7 @@ func (s *commandState) rmFile(filename string) error {
 	return nil
 }
 
-func (s *commandState) addFile(fileName string, remoteFilepath string, isDir bool, permissions uint32, lastMod int64, chunkCount int, fileHash string) (int, error) {
+func (s *commandState) addFile(fileName string, remoteFilepath string, isDir bool, permissions uint32, lastMod int64, chunkCount int, fileHash string) (fi filefreezer.FileInfo, err error) {
 	var putReq models.FilePutRequest
 	putReq.FileName = remoteFilepath
 	putReq.LastMod = lastMod
@@ -47,7 +48,7 @@ func (s *commandState) addFile(fileName string, remoteFilepath string, isDir boo
 	target := fmt.Sprintf("%s/api/files", s.hostURI)
 	body, err := runAuthRequest(target, "POST", s.authToken, putReq)
 	if err != nil {
-		return 0, err
+		return fi, err
 	}
 
 	// if the POST fails or the response is bad, then the file wasn't registered
@@ -55,11 +56,11 @@ func (s *commandState) addFile(fileName string, remoteFilepath string, isDir boo
 	var putResp models.FilePutResponse
 	err = json.Unmarshal(body, &putResp)
 	if err != nil {
-		return 0, err
+		return fi, err
 	}
 
 	// we've registered the file, so now we should sync it
 	_, _, err = s.syncFile(fileName, remoteFilepath)
 
-	return putResp.FileID, err
+	return putResp.FileInfo, err
 }

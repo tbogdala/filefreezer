@@ -16,10 +16,6 @@ import (
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
 )
 
-const (
-	DEBUG_VERSION_MAGIC = 1
-)
-
 // InitRoutes creates the routing multiplexer for the server
 func InitRoutes(state *serverState) *mux.Router {
 	// setup the web server routing table
@@ -37,6 +33,9 @@ func InitRoutes(state *serverState) *mux.Router {
 	// handles registering a file to a user
 	r.Handle("/api/files", authenticateToken(state, handlePutFile(state))).Methods("POST")
 
+	// handles registering a new file version for a given file id
+	r.Handle("/api/file/{fileid:[0-9]+}/version", authenticateToken(state, handleNewFileVersion(state))).Methods("POST")
+
 	// returns a file information response with missing chunk list
 	r.Handle("/api/file/{fileid:[0-9]+}", authenticateToken(state, handleGetFile(state))).Methods("GET")
 
@@ -47,13 +46,13 @@ func InitRoutes(state *serverState) *mux.Router {
 	r.Handle("/api/file/{fileid:[0-9]+}", authenticateToken(state, handleDeleteFile(state))).Methods("DELETE")
 
 	// put a file chunk
-	r.Handle("/api/chunk/{fileid:[0-9]+}/{version:[0-9]+}/{chunknumber:[0-9]+}/{chunkhash}", authenticateToken(state, handlePutFileChunk(state))).Methods("PUT")
+	r.Handle("/api/chunk/{fileid:[0-9]+}/{versionID:[0-9]+}/{chunknumber:[0-9]+}/{chunkhash}", authenticateToken(state, handlePutFileChunk(state))).Methods("PUT")
 
 	// get a file chunk
-	r.Handle("/api/chunk/{fileid:[0-9]+}/{version:[0-9]+}/{chunknumber:[0-9]+}", authenticateToken(state, handleGetFileChunk(state))).Methods("GET")
+	r.Handle("/api/chunk/{fileid:[0-9]+}/{versionID:[0-9]+}/{chunknumber:[0-9]+}", authenticateToken(state, handleGetFileChunk(state))).Methods("GET")
 
 	// get all known file chunks (except the chunks themselves)
-	r.Handle("/api/chunk/{fileid:[0-9]+}/{version:[0-9]+}", authenticateToken(state, handleGetFileChunks(state))).Methods("GET")
+	r.Handle("/api/chunk/{fileid:[0-9]+}/{versionID:[0-9]+}", authenticateToken(state, handleGetFileChunks(state))).Methods("GET")
 
 	return r
 }
@@ -184,7 +183,7 @@ func handleGetFileByName(state *serverState) http.HandlerFunc {
 		}
 
 		// get all of the missing chunks
-		missingChunks, err := state.Storage.GetMissingChunkNumbersForFile(userCreds.ID, fi.FileID, DEBUG_VERSION_MAGIC)
+		missingChunks, err := state.Storage.GetMissingChunkNumbersForFile(userCreds.ID, fi.FileID)
 		if err != nil {
 			http.Error(w, "Failed to get the missing chunks for the file.", http.StatusBadRequest)
 			return
@@ -193,6 +192,58 @@ func handleGetFileByName(state *serverState) http.HandlerFunc {
 		writeJSONResponse(w, &models.FileGetResponse{
 			FileInfo:      *fi,
 			MissingChunks: missingChunks,
+		})
+	}
+}
+
+func handleNewFileVersion(state *serverState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
+		if userCredsI == nil {
+			http.Error(w, "Failed to get the user credentials.", http.StatusUnauthorized)
+			return
+		}
+		userCreds := userCredsI.(*userCredentialsContext)
+
+		// deserialize the JSON object that should be in the request body
+		var req models.NewFileVersionRequest
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read the request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		err = json.Unmarshal(body, &req)
+		if err != nil {
+			http.Error(w, "Failed to parse the request as a JSON object: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// pull the file id from the URI matched by the mux
+		vars := mux.Vars(r)
+		fileID, err := strconv.ParseInt(vars["fileid"], 10, 32)
+		if err != nil {
+			http.Error(w, "A valid integer was not used for the file id in the URI.", http.StatusBadRequest)
+			return
+		}
+
+		// pull down the fileinfo object for a file ID
+		fi, err := state.Storage.GetFileInfo(userCreds.ID, int(fileID))
+		if err != nil {
+			http.Error(w, "Failed to get file for the user.", http.StatusNotFound)
+			return
+		}
+
+		// create new file version
+		fi, err = state.Storage.TagNewFileVersion(userCreds.ID, int(fileID), req.Permissions, req.LastMod, req.ChunkCount, req.FileHash)
+		if err != nil {
+			http.Error(w, "Failed to tag a new version of the file for the user: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		writeJSONResponse(w, &models.NewFileVersionResponse{
+			FileInfo: *fi,
+			Status:   true,
 		})
 	}
 }
@@ -225,7 +276,7 @@ func handleGetFile(state *serverState) http.HandlerFunc {
 		}
 
 		// get all of the missing chunks
-		missingChunks, err := state.Storage.GetMissingChunkNumbersForFile(userCreds.ID, fi.FileID, DEBUG_VERSION_MAGIC)
+		missingChunks, err := state.Storage.GetMissingChunkNumbersForFile(userCreds.ID, fi.FileID)
 		if err != nil {
 			http.Error(w, "Failed to get the missing chunks for the file.", http.StatusBadRequest)
 			return
@@ -238,8 +289,9 @@ func handleGetFile(state *serverState) http.HandlerFunc {
 	}
 }
 
-// handleGetFile returns a JSON object with all of the FileInfo data for the file in Storage
-// as well as a slice of missing chunks, if any.
+// handlePutFileChunk reads a chunk from the request body and attempts to store it given the
+// file ID, chunk number and hash supplied in parameters. A Status boolean is returned to
+// indicate the success of the operation.
 func handlePutFileChunk(state *serverState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -255,6 +307,11 @@ func handlePutFileChunk(state *serverState) http.HandlerFunc {
 		fileID, err := strconv.ParseInt(vars["fileid"], 10, 32)
 		if err != nil {
 			http.Error(w, "A valid integer was not used for the file id in the URI.", http.StatusBadRequest)
+			return
+		}
+		versionID, err := strconv.ParseInt(vars["versionID"], 10, 32)
+		if err != nil {
+			http.Error(w, "A valid string was not used for the version id in the URI.", http.StatusBadRequest)
 			return
 		}
 		chunkNumber, err := strconv.ParseInt(vars["chunknumber"], 10, 32)
@@ -279,7 +336,7 @@ func handlePutFileChunk(state *serverState) http.HandlerFunc {
 
 		// AddFileChunk does verify that the user ID owns the fild ID so we don't need
 		// to replicate that work here, just add the chunk.
-		fc, err := state.Storage.AddFileChunk(userCreds.ID, int(fileID), DEBUG_VERSION_MAGIC, int(chunkNumber), chunkHash, chunk)
+		fc, err := state.Storage.AddFileChunk(userCreds.ID, int(fileID), int(versionID), int(chunkNumber), chunkHash, chunk)
 		if err != nil || fc == nil {
 			http.Error(w, "Failed to add the chunk to storage: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -310,8 +367,13 @@ func handleGetFileChunks(state *serverState) http.HandlerFunc {
 			http.Error(w, "A valid integer was not used for the file id in the URI.", http.StatusBadRequest)
 			return
 		}
+		versionID, err := strconv.ParseInt(vars["versionID"], 10, 32)
+		if err != nil {
+			http.Error(w, "A valid string was not used for the version id in the URI.", http.StatusBadRequest)
+			return
+		}
 
-		chunks, err := state.Storage.GetFileChunkInfos(userCreds.ID, int(fileID), DEBUG_VERSION_MAGIC)
+		chunks, err := state.Storage.GetFileChunkInfos(userCreds.ID, int(fileID), int(versionID))
 		if err != nil {
 			http.Error(w, "Failed to get the chunk informations for the file id in the URI.", http.StatusBadRequest)
 			return
@@ -341,6 +403,11 @@ func handleGetFileChunk(state *serverState) http.HandlerFunc {
 			http.Error(w, "A valid integer was not used for the file id in the URI.", http.StatusBadRequest)
 			return
 		}
+		versionID, err := strconv.ParseInt(vars["versionID"], 10, 32)
+		if err != nil {
+			http.Error(w, "A valid string was not used for the version id in the URI.", http.StatusBadRequest)
+			return
+		}
 		chunkNumber, err := strconv.ParseInt(vars["chunknumber"], 10, 32)
 		if err != nil {
 			http.Error(w, "A valid integer was not used for the chunk number in the URI.", http.StatusBadRequest)
@@ -358,7 +425,7 @@ func handleGetFileChunk(state *serverState) http.HandlerFunc {
 			return
 		}
 
-		chunk, err := state.Storage.GetFileChunk(int(fileID), int(chunkNumber), DEBUG_VERSION_MAGIC)
+		chunk, err := state.Storage.GetFileChunk(int(fileID), int(chunkNumber), int(versionID))
 		if err != nil {
 			http.Error(w, "Failed to get the chunk information for the file id and chunk number in the URI.", http.StatusBadRequest)
 			return
@@ -421,7 +488,7 @@ func handlePutFile(state *serverState) http.HandlerFunc {
 		}
 
 		writeJSONResponse(w, &models.FilePutResponse{
-			FileID: fi.FileID,
+			FileInfo: *fi,
 		})
 	}
 }

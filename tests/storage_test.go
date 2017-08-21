@@ -18,10 +18,6 @@ import (
 	"github.com/tbogdala/filefreezer"
 )
 
-const (
-	DEBUG_VERSION_MAGIC = 1
-)
-
 func TestQuotasAndPermissions(t *testing.T) {
 	// create an in memory storage
 	store, err := filefreezer.NewStorage("file::memory:?mode=memory&cache=shared")
@@ -77,6 +73,9 @@ func TestQuotasAndPermissions(t *testing.T) {
 
 	// track the number of missing chunks before we fail the next test
 	originalMiaList, err := store.GetMissingChunkNumbersForFile(user.ID, fi.FileID)
+	if len(originalMiaList) == 0 {
+		t.Fatal("Should not have an empty missing chunk list after just adding the file.")
+	}
 
 	// make sure that uploading a file fails
 	err = addMissingFileChunks(store, fi)
@@ -111,7 +110,7 @@ func TestQuotasAndPermissions(t *testing.T) {
 	}
 
 	// now attempt to delete a chunk with a bad user id
-	deleted, err := store.RemoveFileChunk(user2.ID, fi.FileID, DEBUG_VERSION_MAGIC, fi.CurrentVersion.ChunkCount-1)
+	deleted, err := store.RemoveFileChunk(user2.ID, fi.FileID, fi.CurrentVersion.VersionID, fi.CurrentVersion.ChunkCount-1)
 	if deleted {
 		t.Fatal("Removed the file chunk from storage with a non-owner user id")
 	}
@@ -352,7 +351,7 @@ func TestBasicDBCreation(t *testing.T) {
 	}
 
 	// make sure we can't get the file chunk or the file info
-	_, err = store.GetFileChunk(first.FileID, DEBUG_VERSION_MAGIC, 0)
+	_, err = store.GetFileChunk(first.FileID, first.CurrentVersion.VersionID, 0)
 	if err == nil {
 		t.Fatalf("Got the first file chunk for the first file when failure was expected.")
 	}
@@ -387,7 +386,7 @@ func TestBasicDBCreation(t *testing.T) {
 	}
 
 	// see that we can get the file chunk infos for the file
-	firstFileChunks, err := store.GetFileChunkInfos(first.UserID, first.FileID, DEBUG_VERSION_MAGIC)
+	firstFileChunks, err := store.GetFileChunkInfos(first.UserID, first.FileID, first.CurrentVersion.VersionID)
 	if err != nil {
 		t.Fatalf("Could not get a list of file chunks for the file (%s): %v:", first.FileName, err)
 	}
@@ -396,7 +395,7 @@ func TestBasicDBCreation(t *testing.T) {
 			len(firstFileChunks), first.CurrentVersion.ChunkCount)
 	}
 	// check to see if some of the chunk data is correct
-	chunk, err := store.GetFileChunk(first.FileID, 0, DEBUG_VERSION_MAGIC)
+	chunk, err := store.GetFileChunk(first.FileID, 0, first.CurrentVersion.VersionID)
 	if err != nil {
 		t.Fatalf("Failed to get the first file chunk for the first file: %v", err)
 	}
@@ -424,7 +423,7 @@ func TestBasicDBCreation(t *testing.T) {
 	}
 
 	// delete the last chunk for the second file
-	deleted, err := store.RemoveFileChunk(second.UserID, second.FileID, DEBUG_VERSION_MAGIC, second.CurrentVersion.ChunkCount-1)
+	deleted, err := store.RemoveFileChunk(second.UserID, second.FileID, second.CurrentVersion.VersionID, second.CurrentVersion.ChunkCount-1)
 	if !deleted {
 		t.Fatal("Failed to remove the file chunk from storage.")
 	}
@@ -475,7 +474,7 @@ func TestBasicDBCreation(t *testing.T) {
 	var frankenBytes []byte
 	frankenBytes = make([]byte, 0)
 	for i := 0; i < second.CurrentVersion.ChunkCount; i++ {
-		fc, err := store.GetFileChunk(second.FileID, i, DEBUG_VERSION_MAGIC)
+		fc, err := store.GetFileChunk(second.FileID, i, second.CurrentVersion.VersionID)
 		if err != nil {
 			t.Fatalf("Unable to get chunk #%d for the file %s: %v", i, second.FileName, err)
 		}
@@ -660,7 +659,7 @@ func addMissingFileChunks(store *filefreezer.Storage, fi *filefreezer.FileInfo) 
 			}
 
 			// send the data to the store
-			newChunk, err := store.AddFileChunk(fi.UserID, fi.FileID, DEBUG_VERSION_MAGIC, i, chunkHash, clampedBuffer)
+			newChunk, err := store.AddFileChunk(fi.UserID, fi.FileID, fi.CurrentVersion.VersionID, i, chunkHash, clampedBuffer)
 			if err != nil {
 				return fmt.Errorf("Failed to add the chunk to storage for file %s: %v", fi.FileName, err)
 			}

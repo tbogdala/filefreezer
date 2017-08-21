@@ -18,7 +18,7 @@ import (
 
 // User kingpin to define a set of commands and flags for the application.
 var (
-	appFlags           = kingpin.New("freezer", "A web application server for FileFreezer.")
+	appFlags           = kingpin.New("freezer", "A command-line interface to filefreezer able to act as client or server.")
 	flagDatabasePath   = appFlags.Flag("db", "The database path.").Default("file:freezer.db").String()
 	flagPublicKeyPath  = appFlags.Flag("pub", "The file path to the public key.").Default("freezer.rsa.pub").String()
 	flagPrivateKeyPath = appFlags.Flag("priv", "The file path to the private key.").Default("freezer.rsa").String()
@@ -104,6 +104,11 @@ func interactiveGetPassword() string {
 }
 
 func main() {
+	fmt.Println("Filefreezer Copyright (C) 2017 by Timothy Bogdala <tdb@animal-machine.com>")
+	fmt.Println("This program comes with ABSOLUTELY NO WARRANTY. This is free software")
+	fmt.Println("and you are welcome to redistribute it under certain conditions.")
+	fmt.Println("")
+
 	switch kingpin.MustParse(appFlags.Parse(os.Args[1:])) {
 	case cmdServe.FullCommand():
 		// setup a new server state or exit out on failure
@@ -180,12 +185,12 @@ func main() {
 			log.Fatalf("Failed to calculate the required data for the file %s: %v", filepath, err)
 		}
 
-		fileID, err := cmdState.addFile(filepath, remoteTarget, false, permissions, lastMod, chunkCount, hashString)
+		fileInfo, err := cmdState.addFile(filepath, remoteTarget, false, permissions, lastMod, chunkCount, hashString)
 		if err != nil {
 			log.Fatalf("Failed to register the file on the server %s: %v", *argAddFileHost, err)
 		}
 
-		log.Printf("File added (id: %d): %s\n", fileID, filepath)
+		log.Printf("File added (FileId: %d | VersionID: %d): %s\n", fileInfo.FileID, fileInfo.CurrentVersion.VersionID, filepath)
 
 	case cmdRmFile.FullCommand():
 		cmdState := newCommandState()
@@ -256,43 +261,3 @@ func main() {
 
 	}
 }
-
-/*
-// fileHashData encapsulates return data for file hash calculation.
-type fileHashData struct {
-	Hash        string
-	IsDir       bool
-	Permissions uint32
-	LastMod     int64
-	ChunkCount  int
-}
-
-// calcFileHashInfo calculates the file hash as well as pulling useful information such as
-// last modified time and chunk count required.
-func calcFileHashInfo(maxChunkSize int64, filename string) (*fileHashData, error) {
-	data := new(fileHashData)
-
-	fileInfo, err := os.Stat(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to stat the local file (%s) for the test", filename)
-	}
-
-	data.LastMod = fileInfo.ModTime().UTC().Unix()
-
-	// calculate the chunk count required for the file size
-	fileSize := fileInfo.Size()
-	data.ChunkCount = int((fileSize - (fileSize % maxChunkSize) + maxChunkSize) / maxChunkSize)
-
-	// generate a hash for the test file
-	hasher := sha1.New()
-	fileBytes, err := ioutil.ReadFile(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create a file byte array for the hashing operation: %v", err)
-	}
-	hasher.Write(fileBytes)
-	hash := hasher.Sum(nil)
-	data.Hash = base64.URLEncoding.EncodeToString(hash)
-
-	return data, nil
-}
-*/
