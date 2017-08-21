@@ -1,4 +1,5 @@
 *.exe
+*.exe~
 *.dll
 *.swp
 .vscode
@@ -9,3 +10,4 @@ cmd/freezer/freezer.crt
 cmd/freezer/freezer.exe
 cmd/freezer/*.db
 cmd/freezer/testdata
+tests/*.dat

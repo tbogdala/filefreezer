@@ -27,6 +27,7 @@ var (
 	flagExtraStrict    = appFlags.Flag("xs", "File checking should be extra strict on file sync comparisons.").Default("true").Bool()
 	flagUserName       = appFlags.Flag("user", "The username for user.").Short('u').String()
 	flagUserPass       = appFlags.Flag("pass", "The password for user.").Short('p').String()
+	flagHost           = appFlags.Flag("host", "The host URL for the server to contact.").Short('h').String()
 
 	cmdServe           = appFlags.Command("serve", "Adds a new user to the storage.")
 	argServeListenAddr = cmdServe.Arg("http", "The net address to listen to").Default(":8080").String()
@@ -42,28 +43,25 @@ var (
 	flagModUserNewName  = cmdModUser.Flag("newuser", "New quota size in bytes.").Short('U').String()
 	flagModUserNewPass  = cmdModUser.Flag("newpass", "New quota size in bytes.").Short('P').String()
 
-	cmdUserStats     = appFlags.Command("userstats", "Gets the quota, allocation and revision counts for the user.")
-	argUserStatsHost = cmdUserStats.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
+	cmdUserStats = appFlags.Command("userstats", "Gets the quota, allocation and revision counts for the user.")
 
-	cmdGetFiles     = appFlags.Command("getfiles", "Gets all files for a user in storage.")
-	argGetFilesHost = cmdGetFiles.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
+	cmdGetFiles = appFlags.Command("getfiles", "Gets all files for a user in storage.")
+
+	cmdGetFileVersions       = appFlags.Command("versions", "Gets all file versions for a given file in storage.")
+	argGetFileVersionsTarget = cmdGetFileVersions.Arg("target", "The file path to on the server to get version information for.").String()
 
 	cmdAddFile       = appFlags.Command("addfile", "Put a file into storage.")
-	argAddFileHost   = cmdAddFile.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
 	argAddFilePath   = cmdAddFile.Arg("filename", "The local file to put on the server.").Required().String()
 	argAddFileTarget = cmdAddFile.Arg("target", "The file path to use on the server for the local file; defaults to the same as the filename arg.").Default("").String()
 
 	cmdRmFile     = appFlags.Command("rmfile", "Remove a file from storage.")
-	argRmFileHost = cmdRmFile.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
 	argRmFilePath = cmdRmFile.Arg("filename", "The file to remove on the server.").Required().String()
 
 	cmdSync       = appFlags.Command("sync", "Synchronizes a path with the server.")
-	argSyncHost   = cmdSync.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
 	argSyncPath   = cmdSync.Arg("filepath", "The file to sync with the server.").Required().String()
 	argSyncTarget = cmdSync.Arg("target", "The file path to sync to on the server; defaults to the same as the filename arg.").Default("").String()
 
 	cmdSyncDir       = appFlags.Command("syncdir", "Synchronizes a directory with the server.")
-	argSyncDirHost   = cmdSyncDir.Arg("hostname", "The host URI for the storage server to contact.").Required().String()
 	argSyncDirPath   = cmdSyncDir.Arg("dirpath", "The directory to sync with the server.").Required().String()
 	argSyncDirTarget = cmdSyncDir.Arg("target", "The directory path to sync to on the server; defaults to the same as the filename arg.").Default("").String()
 )
@@ -101,6 +99,17 @@ func interactiveGetPassword() string {
 	fmt.Print("Password: ")
 	password, _ := reader.ReadString('\n')
 	return strings.TrimSpace(password)
+}
+
+func interactiveGetHost() string {
+	if *flagHost != "" {
+		return *flagHost
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Server URL: ")
+	host, _ := reader.ReadString('\n')
+	return strings.TrimSpace(host)
 }
 
 func main() {
@@ -152,26 +161,44 @@ func main() {
 		cmdState := newCommandState()
 		username := interactiveGetUser()
 		password := interactiveGetPassword()
+		host := interactiveGetHost()
 
-		err := cmdState.authenticate(*argGetFilesHost, username, password)
+		err := cmdState.authenticate(host, username, password)
 		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", *argGetFilesHost, err)
+			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
 		}
 		allFiles, err := cmdState.getAllFileHashes()
 		if err != nil {
-			log.Fatalf("Failed to get all of the files for the user %s from the storage server %s: %v", username, *argGetFilesHost, err)
+			log.Fatalf("Failed to get all of the files for the user %s from the storage server %s: %v", username, host, err)
 		}
 
 		// TODO: Better formmating
 		log.Printf("All files: %v", allFiles)
 
+	case cmdGetFileVersions.FullCommand():
+		cmdState := newCommandState()
+		username := interactiveGetUser()
+		password := interactiveGetPassword()
+		host := interactiveGetHost()
+
+		err := cmdState.authenticate(host, username, password)
+		if err != nil {
+			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
+		}
+		_, _, err = cmdState.getFileVersions(*argGetFileVersionsTarget)
+		if err != nil {
+			log.Fatalf("Failed to get the file versions for the user %s from the storage server %s: %v", username, host, err)
+		}
+
 	case cmdAddFile.FullCommand():
 		cmdState := newCommandState()
 		username := interactiveGetUser()
 		password := interactiveGetPassword()
-		err := cmdState.authenticate(*argAddFileHost, username, password)
+		host := interactiveGetHost()
+
+		err := cmdState.authenticate(host, username, password)
 		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", *argAddFileHost, err)
+			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
 		}
 
 		filepath := *argAddFilePath
@@ -187,7 +214,7 @@ func main() {
 
 		fileInfo, err := cmdState.addFile(filepath, remoteTarget, false, permissions, lastMod, chunkCount, hashString)
 		if err != nil {
-			log.Fatalf("Failed to register the file on the server %s: %v", *argAddFileHost, err)
+			log.Fatalf("Failed to register the file on the server %s: %v", host, err)
 		}
 
 		log.Printf("File added (FileId: %d | VersionID: %d): %s\n", fileInfo.FileID, fileInfo.CurrentVersion.VersionID, filepath)
@@ -196,24 +223,28 @@ func main() {
 		cmdState := newCommandState()
 		username := interactiveGetUser()
 		password := interactiveGetPassword()
-		err := cmdState.authenticate(*argRmFileHost, username, password)
+		host := interactiveGetHost()
+
+		err := cmdState.authenticate(host, username, password)
 		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", *argAddFileHost, err)
+			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
 		}
 
 		filepath := *argRmFilePath
 		err = cmdState.rmFile(filepath)
 		if err != nil {
-			log.Fatalf("Failed to remove file from the server %s: %v", *argRmFileHost, err)
+			log.Fatalf("Failed to remove file from the server %s: %v", host, err)
 		}
 
 	case cmdSync.FullCommand():
 		cmdState := newCommandState()
 		username := interactiveGetUser()
 		password := interactiveGetPassword()
-		err := cmdState.authenticate(*argSyncHost, username, password)
+		host := interactiveGetHost()
+
+		err := cmdState.authenticate(host, username, password)
 		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", *argSyncHost, err)
+			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
 		}
 
 		filepath := *argSyncPath
@@ -230,9 +261,11 @@ func main() {
 		cmdState := newCommandState()
 		username := interactiveGetUser()
 		password := interactiveGetPassword()
-		err := cmdState.authenticate(*argSyncDirHost, username, password)
+		host := interactiveGetHost()
+
+		err := cmdState.authenticate(host, username, password)
 		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", *argSyncDirHost, err)
+			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
 		}
 
 		filepath := *argSyncDirPath
@@ -249,14 +282,16 @@ func main() {
 		cmdState := newCommandState()
 		username := interactiveGetUser()
 		password := interactiveGetPassword()
-		err := cmdState.authenticate(*argUserStatsHost, username, password)
+		host := interactiveGetHost()
+
+		err := cmdState.authenticate(host, username, password)
 		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", *argUserStatsHost, err)
+			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
 		}
 
 		_, err = cmdState.getUserStats()
 		if err != nil {
-			log.Fatalf("Failed to get the user stats from the server %s: %v", *argUserStatsHost, err)
+			log.Fatalf("Failed to get the user stats from the server %s: %v", host, err)
 		}
 
 	}

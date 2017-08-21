@@ -242,9 +242,20 @@ func (s *commandState) syncFile(localFilename string, remoteFilepath string) (st
 		return syncStatusMissing, ulCount, e
 	}
 
+	// if we've got this far, we have a local and remote file with the same lastmod
+	// but differing hashes. for this case we'll upload the local file as a newer version.
+	if localHash != remote.CurrentVersion.FileHash && localLastMod == remote.CurrentVersion.LastMod {
+		ulCount, e := s.syncUploadNewer(remote.FileID, localFilename, remoteFilepath, false, localPermissions, localLastMod, localChunkCount, localHash)
+		return syncStatusLocalNewer, ulCount, e
+	}
+
 	// we checked to make sure it was the same above, but we found it different -- however, no steps to
 	// resolve this were taken, so through an error.
-	return 0, 0, fmt.Errorf("found differences between local (%s) and remote (%s) versions, but this was not reconcilled", localFilename, remoteFilepath)
+	return 0, 0, fmt.Errorf("found differences between local (%s) and remote (%s) versions, "+
+		"but this was not reconcilled; lastmod equality (%v); hash equality (%v)",
+		localFilename, remoteFilepath,
+		localLastMod == remote.CurrentVersion.LastMod,
+		localHash == remote.CurrentVersion.FileHash)
 }
 
 func (s *commandState) syncUploadMissing(remoteID int, remoteVersionID int, filename string, remoteFilepath string, localChunkCount int) (uploadCount int, e error) {

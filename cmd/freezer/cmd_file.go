@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/tbogdala/filefreezer"
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
@@ -63,4 +64,37 @@ func (s *commandState) addFile(fileName string, remoteFilepath string, isDir boo
 	_, _, err = s.syncFile(fileName, remoteFilepath)
 
 	return putResp.FileInfo, err
+}
+
+func (s *commandState) getFileVersions(filename string) (versionIDs []int, versionNums []int, err error) {
+	var getReq models.FileGetByNameRequest
+	getReq.FileName = filename
+
+	// get the file id for the filename provided
+	target := fmt.Sprintf("%s/api/file/name", s.hostURI)
+	body, err := runAuthRequest(target, "GET", s.authToken, getReq)
+	var fi models.FileGetResponse
+	err = json.Unmarshal(body, &fi)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Failed to get the file information for the file name given (%s): %v", filename, err)
+	}
+
+	// get the file id for the filename provided
+	target = fmt.Sprintf("%s/api/file/%d/versions", s.hostURI, fi.FileID)
+	body, err = runAuthRequest(target, "GET", s.authToken, nil)
+	var r models.FileGetAllVersionsResponse
+	err = json.Unmarshal(body, &r)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Failed to get the file versions: %v", err)
+	}
+
+	log.Printf("Registered versions for %s:\n", filename)
+	log.Println(strings.Repeat("=", 25+len(filename)))
+
+	// loop through all of the results and print them
+	for i, vID := range r.VersionIDs {
+		log.Printf("Version ID: %d\t\tNumber: %d", vID, r.VersionNumbers[i])
+	}
+
+	return r.VersionIDs, r.VersionNumbers, nil
 }

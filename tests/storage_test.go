@@ -9,14 +9,33 @@ import (
 	"encoding/base64"
 	"io"
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"sort"
 	"testing"
+	"time"
 
 	"fmt"
 
 	"github.com/tbogdala/filefreezer"
 )
+
+func TestMain(m *testing.M) {
+	rand.Seed(time.Now().Unix())
+	os.Exit(m.Run())
+}
+
+// generates a non-crypto strength random byte array of specified length
+func genRandomBytes(length int) []byte {
+	b := make([]byte, length)
+	for i := 0; i < length; i++ {
+		b[i] = byte(rand.Uint32() >> 24)
+		if b[i] == 0 {
+			b[i] = 1
+		}
+	}
+	return b
+}
 
 func TestQuotasAndPermissions(t *testing.T) {
 	// create an in memory storage
@@ -521,6 +540,333 @@ func TestBasicDBCreation(t *testing.T) {
 	}
 	if len(allFiles) > 0 {
 		t.Fatalf("There were files left behind after removing a user.")
+	}
+}
+
+func TestFileVersioning(t *testing.T) {
+	bytesAllocated := 0
+
+	// create an in memory storage
+	store, err := filefreezer.NewStorage("file::memory:?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatalf("Failed to create the in-memory storage for testing. %v", err)
+	}
+	defer store.Close()
+
+	// setup the tables in test database
+	err = store.CreateTables()
+	if err != nil {
+		t.Fatalf("Failed to create tables for testing. %v", err)
+	}
+	setupTestUser(store, "admin", "12345667890", t)
+	user, err := store.GetUser("admin")
+	if err != nil {
+		t.Fatal("GetUser failed to get the admin test user.")
+	}
+
+	// make sure we don't have any files in the database already as a sanity check
+	allFiles, err := store.GetAllUserFileInfos(user.ID)
+	if err != nil || len(allFiles) > 0 {
+		t.Fatalf("The server isn't in a clean state and already has file associated with the user.")
+	}
+
+	// generate some test file data
+	const testFilename1 = "versioning_test_001.dat"
+	rando1 := genRandomBytes(int(store.ChunkSize) * 3)
+	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
+	defer os.Remove(testFilename1)
+
+	// get the local file information
+	chunkCount, lastMod, permissions, hashString, err := filefreezer.CalcFileHashInfo(store.ChunkSize, testFilename1)
+	if err != nil {
+		t.Fatalf("Failed to calculate the file hash for %s: %v", testFilename1, err)
+	}
+
+	///////////////////////////////////////////////////////////////////////////
+	// upload initial version
+
+	// add the file information to the storage server
+	fi, err := store.AddFileInfo(user.ID, testFilename1, false, permissions, lastMod, chunkCount, hashString)
+	if err != nil {
+		t.Fatalf("Failed to add a new file (%s): %v", testFilename1, err)
+	}
+
+	// upload the original version of the file
+	err = addMissingFileChunks(store, fi)
+	if err != nil {
+		t.Fatalf("An error was received after uploading chunks of a test file: %v", err)
+	}
+
+	// verify we have the file registered
+	allFiles, err = store.GetAllUserFileInfos(user.ID)
+	if err != nil || len(allFiles) != 1 {
+		t.Fatalf("The server didn't register the uploading of the test file correctly.")
+	}
+
+	// make sure all chunks have been uploaded
+	miaList, err := store.GetMissingChunkNumbersForFile(user.ID, fi.FileID)
+	if err != nil {
+		t.Fatalf("Could not get a list of missing chunks for the file (%s): %v", testFilename1, err)
+	}
+	if len(miaList) != 0 {
+		t.Fatalf("Missing chunks were found for the file (%s) after uploading them.", testFilename1)
+	}
+
+	// make sure there's only one file version regiestered for the file
+	versionIDs, versionNums, err := store.GetFileVersions(fi.FileID)
+	if err != nil {
+		t.Fatalf("Failed to get the file versions for the test file: %v", err)
+	}
+	if len(versionIDs) != 1 || len(versionNums) != 1 {
+		t.Fatalf("Expected to get one file version for the test file but received %d.", len(versionIDs))
+	}
+	if versionNums[0] != 1 {
+		t.Fatalf("The first version number for the test file was not 1, it was %d.", versionNums[0])
+	}
+
+	// make sure the user quota updated correctly
+	bytesAllocated += len(rando1)
+	userStats, err := store.GetUserStats(user.ID)
+	if err != nil {
+		t.Fatalf("Failed to get the user stats for the test user: %v", err)
+	}
+	if userStats.Allocated != bytesAllocated {
+		t.Fatalf("Expected %d bytes allocated but the server returned %d.", bytesAllocated, userStats.Allocated)
+	}
+
+	///////////////////////////////////////////////////////////////////////////
+	// modify existing chunk and upload a new version
+	rando1[0] = 0xDE
+	rando1[1] = 0xAD
+	rando1[2] = 0xBE
+	rando1[3] = 0xEF
+	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
+	chunkCount, lastMod, permissions, hashString, err = filefreezer.CalcFileHashInfo(store.ChunkSize, testFilename1)
+	if err != nil {
+		t.Fatalf("Failed to calculate the file hash for %s: %v", testFilename1, err)
+	}
+
+	// register a new version of the file in storage with the updated local information
+	fiV2, err := store.TagNewFileVersion(user.ID, fi.FileID, permissions, lastMod, chunkCount, hashString)
+	if err != nil {
+		t.Fatalf("Failed to tag a new file version for %s: %v", testFilename1, err)
+	}
+	if fiV2.FileID != fi.FileID {
+		t.Fatalf("File ID changed between version tagging from %d to %d.", fi.FileID, fiV2.FileID)
+	}
+
+	// upload the second version of the file
+	err = addMissingFileChunks(store, fiV2)
+	if err != nil {
+		t.Fatalf("An error was received after uploading chunks of the test file v2: %v", err)
+	}
+
+	// verify we still only have the one file registered
+	allFiles, err = store.GetAllUserFileInfos(user.ID)
+	if err != nil || len(allFiles) != 1 {
+		t.Fatalf("The server has more tha one file registered to a user when uploading the second version.")
+	}
+
+	// make sure all chunks have been uploaded
+	miaList, err = store.GetMissingChunkNumbersForFile(user.ID, fiV2.FileID)
+	if err != nil {
+		t.Fatalf("Could not get a list of missing chunks for the file (%s): %v", testFilename1, err)
+	}
+	if len(miaList) != 0 {
+		t.Fatalf("Missing chunks were found for the file (%s) after uploading them.", testFilename1)
+	}
+
+	// verify that we get two versions back for the given file ID
+	versionIDs, versionNums, err = store.GetFileVersions(fiV2.FileID)
+	if err != nil {
+		t.Fatalf("Failed to get the file versions for the test file: %v", err)
+	}
+	if len(versionIDs) != 2 || len(versionNums) != 2 {
+		t.Fatalf("Expected to get two file versions for the test file but received %d.", len(versionIDs))
+	}
+
+	// make sure the user quota updated correctly
+	bytesAllocated += len(rando1)
+	userStats, err = store.GetUserStats(user.ID)
+	if err != nil {
+		t.Fatalf("Failed to get the user stats for the test user: %v", err)
+	}
+	if userStats.Allocated != bytesAllocated {
+		t.Fatalf("Expected %d bytes allocated but the server returned %d.", bytesAllocated, userStats.Allocated)
+	}
+
+	///////////////////////////////////////////////////////////////////////////
+	// modify all existing chunks and upload a new version
+	rando1 = genRandomBytes(int(store.ChunkSize) * 3)
+	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
+	chunkCount, lastMod, permissions, hashString, err = filefreezer.CalcFileHashInfo(store.ChunkSize, testFilename1)
+	if err != nil {
+		t.Fatalf("Failed to calculate the file hash for %s: %v", testFilename1, err)
+	}
+
+	// register a new version of the file in storage with the updated local information
+	fiV3, err := store.TagNewFileVersion(user.ID, fiV2.FileID, permissions, lastMod, chunkCount, hashString)
+	if err != nil {
+		t.Fatalf("Failed to tag a new file version for %s: %v", testFilename1, err)
+	}
+	if fiV3.FileID != fi.FileID {
+		t.Fatalf("File ID changed between version tagging from %d to %d.", fi.FileID, fiV3.FileID)
+	}
+
+	// upload the third version of the file
+	err = addMissingFileChunks(store, fiV3)
+	if err != nil {
+		t.Fatalf("An error was received after uploading chunks of the test file v3: %v", err)
+	}
+
+	// verify we still only have the one file registered
+	allFiles, err = store.GetAllUserFileInfos(user.ID)
+	if err != nil || len(allFiles) != 1 {
+		t.Fatalf("The server has more tha one file registered to a user when uploading the third version.")
+	}
+
+	// make sure all chunks have been uploaded
+	miaList, err = store.GetMissingChunkNumbersForFile(user.ID, fiV3.FileID)
+	if err != nil {
+		t.Fatalf("Could not get a list of missing chunks for the file (%s): %v", testFilename1, err)
+	}
+	if len(miaList) != 0 {
+		t.Fatalf("Missing chunks were found for the file (%s) after uploading them.", testFilename1)
+	}
+
+	// verify that we get three versions back for the given file ID
+	versionIDs, versionNums, err = store.GetFileVersions(fiV3.FileID)
+	if err != nil {
+		t.Fatalf("Failed to get the file versions for the test file: %v", err)
+	}
+	if len(versionIDs) != 3 || len(versionNums) != 3 {
+		t.Fatalf("Expected to get three file versions for the test file but received %d.", len(versionIDs))
+	}
+
+	// make sure the user quota updated correctly
+	bytesAllocated += len(rando1)
+	userStats, err = store.GetUserStats(user.ID)
+	if err != nil {
+		t.Fatalf("Failed to get the user stats for the test user: %v", err)
+	}
+	if userStats.Allocated != bytesAllocated {
+		t.Fatalf("Expected %d bytes allocated but the server returned %d.", bytesAllocated, userStats.Allocated)
+	}
+
+	///////////////////////////////////////////////////////////////////////////
+	// make a larger file and upload a new version
+	rando1 = genRandomBytes(int(store.ChunkSize) * 6)
+	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
+	chunkCount, lastMod, permissions, hashString, err = filefreezer.CalcFileHashInfo(store.ChunkSize, testFilename1)
+	if err != nil {
+		t.Fatalf("Failed to calculate the file hash for %s: %v", testFilename1, err)
+	}
+
+	// register a new version of the file in storage with the updated local information
+	fiV4, err := store.TagNewFileVersion(user.ID, fiV3.FileID, permissions, lastMod, chunkCount, hashString)
+	if err != nil {
+		t.Fatalf("Failed to tag a new file version for %s: %v", testFilename1, err)
+	}
+	if fiV4.FileID != fi.FileID {
+		t.Fatalf("File ID changed between version tagging from %d to %d.", fi.FileID, fiV4.FileID)
+	}
+
+	// upload the fourth version of the file
+	err = addMissingFileChunks(store, fiV4)
+	if err != nil {
+		t.Fatalf("An error was received after uploading chunks of the test file v4: %v", err)
+	}
+
+	// verify we still only have the one file registered
+	allFiles, err = store.GetAllUserFileInfos(user.ID)
+	if err != nil || len(allFiles) != 1 {
+		t.Fatalf("The server has more tha one file registered to a user when uploading the fourth version.")
+	}
+
+	// make sure all chunks have been uploaded
+	miaList, err = store.GetMissingChunkNumbersForFile(user.ID, fiV4.FileID)
+	if err != nil {
+		t.Fatalf("Could not get a list of missing chunks for the file (%s): %v", testFilename1, err)
+	}
+	if len(miaList) != 0 {
+		t.Fatalf("Missing chunks were found for the file (%s) after uploading them.", testFilename1)
+	}
+
+	// verify that we get four versions back for the given file ID
+	versionIDs, versionNums, err = store.GetFileVersions(fiV4.FileID)
+	if err != nil {
+		t.Fatalf("Failed to get the file versions for the test file: %v", err)
+	}
+	if len(versionIDs) != 4 || len(versionNums) != 4 {
+		t.Fatalf("Expected to get four versions for the test file but received %d.", len(versionIDs))
+	}
+
+	// make sure the user quota updated correctly
+	bytesAllocated += len(rando1)
+	userStats, err = store.GetUserStats(user.ID)
+	if err != nil {
+		t.Fatalf("Failed to get the user stats for the test user: %v", err)
+	}
+	if userStats.Allocated != bytesAllocated {
+		t.Fatalf("Expected %d bytes allocated but the server returned %d.", bytesAllocated, userStats.Allocated)
+	}
+
+	///////////////////////////////////////////////////////////////////////////
+	// make the file smaller and upload a new version
+	rando1 = rando1[:(int(store.ChunkSize)*2)-1]
+	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
+	chunkCount, lastMod, permissions, hashString, err = filefreezer.CalcFileHashInfo(store.ChunkSize, testFilename1)
+	if err != nil {
+		t.Fatalf("Failed to calculate the file hash for %s: %v", testFilename1, err)
+	}
+
+	// register a new version of the file in storage with the updated local information
+	fiV5, err := store.TagNewFileVersion(user.ID, fiV4.FileID, permissions, lastMod, chunkCount, hashString)
+	if err != nil {
+		t.Fatalf("Failed to tag a new file version for %s: %v", testFilename1, err)
+	}
+	if fiV5.FileID != fi.FileID {
+		t.Fatalf("File ID changed between version tagging from %d to %d.", fi.FileID, fiV4.FileID)
+	}
+
+	// upload the fifth version of the file
+	err = addMissingFileChunks(store, fiV5)
+	if err != nil {
+		t.Fatalf("An error was received after uploading chunks of the test file v5: %v", err)
+	}
+
+	// verify we still only have the one file registered
+	allFiles, err = store.GetAllUserFileInfos(user.ID)
+	if err != nil || len(allFiles) != 1 {
+		t.Fatalf("The server has more tha one file registered to a user when uploading the fifth version.")
+	}
+
+	// make sure all chunks have been uploaded
+	miaList, err = store.GetMissingChunkNumbersForFile(user.ID, fiV5.FileID)
+	if err != nil {
+		t.Fatalf("Could not get a list of missing chunks for the file (%s): %v", testFilename1, err)
+	}
+	if len(miaList) != 0 {
+		t.Fatalf("Missing chunks were found for the file (%s) after uploading them.", testFilename1)
+	}
+
+	// verify that we get five versions back for the given file ID
+	versionIDs, versionNums, err = store.GetFileVersions(fiV5.FileID)
+	if err != nil {
+		t.Fatalf("Failed to get the file versions for the test file: %v", err)
+	}
+	if len(versionIDs) != 5 || len(versionNums) != 5 {
+		t.Fatalf("Expected to get five file versions for the test file but received %d.", len(versionIDs))
+	}
+
+	// make sure the user quota updated correctly
+	bytesAllocated += len(rando1)
+	userStats, err = store.GetUserStats(user.ID)
+	if err != nil {
+		t.Fatalf("Failed to get the user stats for the test user: %v", err)
+	}
+	if userStats.Allocated != bytesAllocated {
+		t.Fatalf("Expected %d bytes allocated but the server returned %d.", bytesAllocated, userStats.Allocated)
 	}
 }
 

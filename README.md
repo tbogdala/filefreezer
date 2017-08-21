@@ -62,10 +62,10 @@ go build
 With the server running you can now execute commands, such as:
 
 ```bash
-./freezer -u admin -p 1234 userstats http://127.0.0.1:8080
-./freezer -u admin -p 1234 getfiles http://127.0.0.1:8080
-./freezer -u admin -p 1234 sync http://127.0.0.1:8080 .bashrc /backupcfg
-./freezer -u admin -p 1234 syncdir http://127.0.0.1:8080 ~/Downloads /data
+./freezer -u admin -p 1234 -h http://127.0.0.1:8080 userstats
+./freezer -u admin -p 1234 -h http://127.0.0.1:8080 getfiles
+./freezer -u admin -p 1234 -h http://127.0.0.1:8080 sync .bashrc /backupcfg
+./freezer -u admin -p 1234 -h http://127.0.0.1:8080 syncdir ~/Downloads /data
 ```
 
 Known Bugs and Limitations
@@ -83,10 +83,12 @@ Known Bugs and Limitations
   Consider bumping the revision with new files are added or otherwise changed too.
 
 * userid is taken on some Storage methods, but not all, for checking correct user is accessing data
-
++
 * cli flag to sync against a particular version
 
 * cli command to view a list of versions
+
+
 
 TODO / Notes
 ------------
@@ -109,3 +111,11 @@ TODO / Notes
 * work on readability of error messages wrt bubbling up error objects
 
 * condsider bit depth of parameters read in in routes.go (32 vs 64)
+
+* client-side encryption support is still needed
+
+* vendor the dependencies; possibly with govendor
+
+* ability to purge version history
+
+* multithreading the chunk uploading of files

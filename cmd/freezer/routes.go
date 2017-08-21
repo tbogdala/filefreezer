@@ -42,6 +42,9 @@ func InitRoutes(state *serverState) *mux.Router {
 	// returns a file information response with missing chunk list -- same as /api/file/{fileid} but for filenames
 	r.Handle("/api/file/name", authenticateToken(state, handleGetFileByName(state))).Methods("GET")
 
+	// handles registering a new file version for a given file id
+	r.Handle("/api/file/{fileid:[0-9]+}/versions", authenticateToken(state, handleGetAllFileVersion(state))).Methods("Get")
+
 	// deletes a file
 	r.Handle("/api/file/{fileid:[0-9]+}", authenticateToken(state, handleDeleteFile(state))).Methods("DELETE")
 
@@ -244,6 +247,45 @@ func handleNewFileVersion(state *serverState) http.HandlerFunc {
 		writeJSONResponse(w, &models.NewFileVersionResponse{
 			FileInfo: *fi,
 			Status:   true,
+		})
+	}
+}
+
+func handleGetAllFileVersion(state *serverState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
+		if userCredsI == nil {
+			http.Error(w, "Failed to get the user credentials.", http.StatusUnauthorized)
+			return
+		}
+		userCreds := userCredsI.(*userCredentialsContext)
+
+		// pull the file id from the URI matched by the mux
+		vars := mux.Vars(r)
+		fileID, err := strconv.ParseInt(vars["fileid"], 10, 32)
+		if err != nil {
+			http.Error(w, "A valid integer was not used for the file id in the URI.", http.StatusBadRequest)
+			return
+		}
+
+		// pull down the fileinfo object for a file ID
+		fi, err := state.Storage.GetFileInfo(userCreds.ID, int(fileID))
+		if err != nil {
+			http.Error(w, "Failed to get file for the user.", http.StatusNotFound)
+			return
+		}
+
+		// get all the versions associated with the file in storage
+		versionIDs, versionNums, err := state.Storage.GetFileVersions(fi.FileID)
+		if err != nil {
+			http.Error(w, "Failed to get file versions for the user.", http.StatusNotFound)
+			return
+		}
+
+		writeJSONResponse(w, &models.FileGetAllVersionsResponse{
+			VersionIDs:     versionIDs,
+			VersionNumbers: versionNums,
 		})
 	}
 }

@@ -535,6 +535,264 @@ func TestEverything(t *testing.T) {
 
 }
 
+func TestFileVersioning(t *testing.T) {
+	bytesAllocated := 0
+
+	cmdState := newCommandState()
+
+	// recreate a test user
+	username := "admin"
+	password := "1234"
+	userQuota := int(1e9)
+	cmdState.rmUser(state.Storage, username)
+	user := cmdState.addUser(state.Storage, username, password, userQuota)
+	if user == nil {
+		t.Fatalf("Failed to add the test user (%s) to Storage", username)
+	}
+
+	// attempt to get the authentication token
+	err := cmdState.authenticate(testHost, username, password)
+	if err != nil {
+		t.Fatalf("Failed to authenticate as the test user: %v", err)
+	}
+
+	// make sure to remove any files from storage
+	err = removeAllFilesFromStorage(cmdState)
+	if err != nil {
+		t.Fatalf("Unable to remove all files from storage for the test user: %v", err)
+	}
+
+	// pull all the file infos ... should be empty
+	allFiles, err := cmdState.getAllFileHashes()
+	if err != nil {
+		t.Fatalf("Failed to authenticate as the test user: %v", err)
+	} else if len(allFiles) != 0 {
+		t.Fatalf("Expected to get an empty slice of FileInfo, but instead got one of length %d.", len(allFiles))
+	}
+
+	// regenerate some test file data
+	rando1 := genRandomBytes(int(*flagServeChunkSize) * 3)
+	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
+
+	// get the local file information
+	filename := testFilename1
+	chunkCount, lastMod, permissions, hashString, err := filefreezer.CalcFileHashInfo(cmdState.serverCapabilities.ChunkSize, filename)
+	if err != nil {
+		t.Fatalf("Failed to calculate the file hash for %s: %v", testFilename1, err)
+	}
+
+	///////////////////////////////////////////////////////////////////////////
+	// upload initial version
+
+	// add the file information to the storage server
+	fileInfo, err := cmdState.addFile(filename, filename, false, permissions, lastMod, chunkCount, hashString)
+	if err != nil {
+		t.Fatalf("Failed to at the file %s: %v", filename, err)
+	}
+	t.Logf("Added file %s (id: %d) ...", filename, fileInfo.FileID)
+
+	// verify we have the file registered
+	allFiles, err = cmdState.getAllFileHashes()
+	if err != nil {
+		t.Fatalf("Failed to authenticate as the test user: %v", err)
+	} else if len(allFiles) != 1 {
+		t.Fatalf("Expected to a slice of one FileInfo object, but instead got one of length %d.", len(allFiles))
+	}
+
+	// make sure there's only one file version regiestered for the file
+	versionIDs, versionNums, err := cmdState.getFileVersions(filename)
+	if err != nil {
+		t.Fatalf("Failed to get the file versions for the test file: %v", err)
+	}
+	if len(versionIDs) != 1 || len(versionNums) != 1 {
+		t.Fatalf("Expected to get one file version for the test file but received %d.", len(versionIDs))
+	}
+	if versionNums[0] != 1 {
+		t.Fatalf("The first version number for the test file was not 1, it was %d.", versionNums[0])
+	}
+
+	// make sure the user quota updated correctly
+	bytesAllocated += len(rando1)
+	userStats, err := cmdState.getUserStats()
+	if err != nil {
+		t.Fatalf("Failed to get the user stats for the test user: %v", err)
+	}
+	if userStats.Allocated != bytesAllocated {
+		t.Fatalf("Expected %d bytes allocated but the server returned %d.", bytesAllocated, userStats.Allocated)
+	}
+
+	///////////////////////////////////////////////////////////////////////////
+	// modify existing chunk and upload a new version
+	rando1[0] = 0xDE
+	rando1[1] = 0xAD
+	rando1[2] = 0xBE
+	rando1[3] = 0xEF
+	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
+	chunkCount, lastMod, permissions, hashString, err = filefreezer.CalcFileHashInfo(cmdState.serverCapabilities.ChunkSize, filename)
+	if err != nil {
+		t.Fatalf("Failed to calculate the file hash for %s: %v", testFilename1, err)
+	}
+
+	// upload a newer version of the file
+	status, _, err := cmdState.syncFile(filename, filename)
+	if err != nil {
+		t.Fatalf("Error while updating file to a newer version via sync: %v", err)
+	}
+	if status != syncStatusLocalNewer {
+		t.Fatalf("Failed to correctly sync the second version of a test file: status wasn't local newer (%v).", status)
+	}
+
+	// verify we have only the one file registered
+	allFiles, err = cmdState.getAllFileHashes()
+	if err != nil {
+		t.Fatalf("Failed to authenticate as the test user: %v", err)
+	} else if len(allFiles) != 1 {
+		t.Fatalf("Expected to a slice of one FileInfo object, but instead got one of length %d.", len(allFiles))
+	}
+
+	// verify that we get two versions back for the given file ID
+	versionIDs, versionNums, err = cmdState.getFileVersions(filename)
+	if err != nil {
+		t.Fatalf("Failed to get the file versions for the test file: %v", err)
+	}
+	if len(versionIDs) != 2 || len(versionNums) != 2 {
+		t.Fatalf("Expected to get two file versions for the test file but received %d.", len(versionIDs))
+	}
+
+	// make sure the user quota updated correctly
+	bytesAllocated += len(rando1)
+	userStats, err = cmdState.getUserStats()
+	if err != nil {
+		t.Fatalf("Failed to get the user stats for the test user: %v", err)
+	}
+	if userStats.Allocated != bytesAllocated {
+		t.Fatalf("Expected %d bytes allocated but the server returned %d.", bytesAllocated, userStats.Allocated)
+	}
+
+	///////////////////////////////////////////////////////////////////////////
+	// modify all existing chunks and upload a new version
+	rando1 = genRandomBytes(int(*flagServeChunkSize) * 3)
+	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
+
+	// upload a newer version of the file
+	status, _, err = cmdState.syncFile(filename, filename)
+	if err != nil {
+		t.Fatalf("Error while updating file to a newer version via sync: %v", err)
+	}
+	if status != syncStatusLocalNewer {
+		t.Fatalf("Failed to correctly sync the third version of a test file: status wasn't local newer (%v).", status)
+	}
+
+	// verify we have only the one file registered
+	allFiles, err = cmdState.getAllFileHashes()
+	if err != nil {
+		t.Fatalf("Failed to authenticate as the test user: %v", err)
+	} else if len(allFiles) != 1 {
+		t.Fatalf("Expected to a slice of one FileInfo object, but instead got one of length %d.", len(allFiles))
+	}
+
+	// verify that we get three versions back for the given file ID
+	versionIDs, versionNums, err = cmdState.getFileVersions(filename)
+	if err != nil {
+		t.Fatalf("Failed to get the file versions for the test file: %v", err)
+	}
+	if len(versionIDs) != 3 || len(versionNums) != 3 {
+		t.Fatalf("Expected to get three file versions for the test file but received %d.", len(versionIDs))
+	}
+
+	// make sure the user quota updated correctly
+	bytesAllocated += len(rando1)
+	userStats, err = cmdState.getUserStats()
+	if err != nil {
+		t.Fatalf("Failed to get the user stats for the test user: %v", err)
+	}
+	if userStats.Allocated != bytesAllocated {
+		t.Fatalf("Expected %d bytes allocated but the server returned %d.", bytesAllocated, userStats.Allocated)
+	}
+
+	///////////////////////////////////////////////////////////////////////////
+	// make a larger file and upload a new version
+	rando1 = genRandomBytes(int(*flagServeChunkSize) * 6)
+	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
+
+	// upload a newer version of the file
+	status, _, err = cmdState.syncFile(filename, filename)
+	if err != nil {
+		t.Fatalf("Error while updating file to a newer version via sync: %v", err)
+	}
+	if status != syncStatusLocalNewer {
+		t.Fatalf("Failed to correctly sync the fourth version of a test file: status wasn't local newer (%v).", status)
+	}
+
+	// verify we have only the one file registered
+	allFiles, err = cmdState.getAllFileHashes()
+	if err != nil {
+		t.Fatalf("Failed to authenticate as the test user: %v", err)
+	} else if len(allFiles) != 1 {
+		t.Fatalf("Expected to a slice of one FileInfo object, but instead got one of length %d.", len(allFiles))
+	}
+
+	// verify that we get four versions back for the given file ID
+	versionIDs, versionNums, err = cmdState.getFileVersions(filename)
+	if err != nil {
+		t.Fatalf("Failed to get the file versions for the test file: %v", err)
+	}
+	if len(versionIDs) != 4 || len(versionNums) != 4 {
+		t.Fatalf("Expected to get four versions for the test file but received %d.", len(versionIDs))
+	}
+
+	// make sure the user quota updated correctly
+	bytesAllocated += len(rando1)
+	userStats, err = cmdState.getUserStats()
+	if err != nil {
+		t.Fatalf("Failed to get the user stats for the test user: %v", err)
+	}
+	if userStats.Allocated != bytesAllocated {
+		t.Fatalf("Expected %d bytes allocated but the server returned %d.", bytesAllocated, userStats.Allocated)
+	}
+
+	///////////////////////////////////////////////////////////////////////////
+	// make the file smaller and upload a new version
+	rando1 = rando1[:(int(*flagServeChunkSize)*2)-1]
+	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
+
+	// upload a newer version of the file
+	status, _, err = cmdState.syncFile(filename, filename)
+	if err != nil {
+		t.Fatalf("Error while updating file to a newer version via sync: %v", err)
+	}
+	if status != syncStatusLocalNewer {
+		t.Fatalf("Failed to correctly sync the fifth version of a test file: status wasn't local newer (%v).", status)
+	}
+
+	// verify we have only the one file registered
+	allFiles, err = cmdState.getAllFileHashes()
+	if err != nil {
+		t.Fatalf("Failed to authenticate as the test user: %v", err)
+	} else if len(allFiles) != 1 {
+		t.Fatalf("Expected to a slice of one FileInfo object, but instead got one of length %d.", len(allFiles))
+	}
+
+	// verify that we get five versions back for the given file ID
+	versionIDs, versionNums, err = cmdState.getFileVersions(filename)
+	if err != nil {
+		t.Fatalf("Failed to get the file versions for the test file: %v", err)
+	}
+	if len(versionIDs) != 5 || len(versionNums) != 5 {
+		t.Fatalf("Expected to get five file versions for the test file but received %d.", len(versionIDs))
+	}
+
+	// make sure the user quota updated correctly
+	bytesAllocated += len(rando1)
+	userStats, err = cmdState.getUserStats()
+	if err != nil {
+		t.Fatalf("Failed to get the user stats for the test user: %v", err)
+	}
+	if userStats.Allocated != bytesAllocated {
+		t.Fatalf("Expected %d bytes allocated but the server returned %d.", bytesAllocated, userStats.Allocated)
+	}
+}
+
 func removeAllFilesFromStorage(cmdState *commandState) error {
 	// get all of the remote file names
 	allRemoteFiles, err := cmdState.getAllFileHashes()
