@@ -507,7 +507,7 @@ func handlePutFile(state *serverState) http.HandlerFunc {
 			http.Error(w, "lastMod time must be supplied in the request", http.StatusBadRequest)
 			return
 		}
-		if req.ChunkCount < 1 {
+		if req.ChunkCount < 0 {
 			http.Error(w, "chunkCount must be supplied in the request", http.StatusBadRequest)
 			return
 		}
@@ -551,7 +551,7 @@ func handleDeleteFile(state *serverState) http.HandlerFunc {
 		// delete a file from storage with the information
 		err = state.Storage.RemoveFile(userCreds.ID, int(fileID))
 		if err != nil {
-			http.Error(w, "Failed to put a new file in storage for the user. "+err.Error(), http.StatusConflict)
+			http.Error(w, "Failed to remove a file in storage for the user. "+err.Error(), http.StatusConflict)
 			return
 		}
 

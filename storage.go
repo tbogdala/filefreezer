@@ -85,7 +85,8 @@ const (
 	removeAllFileChunks   = `DELETE FROM FileChunks WHERE FileID = ?;`
 	removeFileChunk       = `DELETE FROM FileChunks WHERE FileID = ? AND VersionID = ? AND ChunkNum = ?;`
 	getFileChunk          = `SELECT ChunkHash, Chunk FROM FileChunks WHERE FileID = ? AND VersionID = ? AND ChunkNum = ?;`
-	getFileTotalChunkSize = "SELECT SUM(LENGTH(Chunk)) FROM FileChunks WHERE FileID = ?;"
+	getFileTotalChunkSize = `SELECT SUM(LENGTH(Chunk)) FROM FileChunks WHERE FileID = ?;`
+	getNumberOfFileChunks = `SELECT COUNT(*) AS COUNT FROM FileChunks WHERE FileID = ?;`
 
 	removeUser = `DELETE FROM FileChunks WHERE FileID IN (SELECT FileID FROM FileInfo WHERE UserID = ?);
 		DELETE FROM FileVersion WHERE FileID IN (SELECT FileID FROM FileInfo WHERE UserID = ?);
@@ -443,37 +444,47 @@ func (s *Storage) RemoveFile(userID, fileID int) error {
 			return fmt.Errorf("failed to remove the file versions in the database: %v", err)
 		}
 
+		// check to see if we have file chunks associated with this file -- which
+		// you will not have if the file is empty or the chunks have not been uploaded yet.
+		var totalChunkCount int
+		err = tx.QueryRow(getNumberOfFileChunks, fileID).Scan(&totalChunkCount)
+		if err != nil {
+			return fmt.Errorf("failed to get the chunk count for a file in the database: %v", err)
+		}
+
 		// get the total size for all chunks attached to the file id
 		var totalChunkSize int
-		err = tx.QueryRow(getFileTotalChunkSize, fileID).Scan(&totalChunkSize)
-		if err != nil {
-			return fmt.Errorf("failed to get the chunk sizes for a file in the database: %v", err)
-		}
-
-		// remove all of the file chunks
-		_, err = tx.Exec(removeAllFileChunks, fileID)
-		if err != nil {
-			return fmt.Errorf("failed to delete the file chunks associated with the file: %v", err)
-		}
-
-		// update the allocation counts
-		if totalChunkSize > 0 {
-			res, err := tx.Exec(updateUserStats, -totalChunkSize, userID)
+		if totalChunkCount > 0 {
+			err = tx.QueryRow(getFileTotalChunkSize, fileID).Scan(&totalChunkSize)
 			if err != nil {
-				return fmt.Errorf("failed to update the allocated bytes in the database after removing chunks: %v", err)
+				return fmt.Errorf("failed to get the chunk sizes for a file in the database: %v", err)
 			}
 
-			// make sure one row was affected with the UPDATE statement
-			affected, err := res.RowsAffected()
-			if affected != 1 {
-				return fmt.Errorf("failed to update the user info in the database after removing chunks; no rows were affected")
-			} else if err != nil {
-				return fmt.Errorf("failed to update the user info in the database after removing chunks: %v", err)
+			// remove all of the file chunks
+			_, err = tx.Exec(removeAllFileChunks, fileID)
+			if err != nil {
+				return fmt.Errorf("failed to delete the file chunks associated with the file: %v", err)
+			}
+
+			// update the allocation counts
+			if totalChunkSize > 0 {
+				res, err := tx.Exec(updateUserStats, -totalChunkSize, userID)
+				if err != nil {
+					return fmt.Errorf("failed to update the allocated bytes in the database after removing chunks: %v", err)
+				}
+
+				// make sure one row was affected with the UPDATE statement
+				affected, err := res.RowsAffected()
+				if affected != 1 {
+					return fmt.Errorf("failed to update the user info in the database after removing chunks; no rows were affected")
+				} else if err != nil {
+					return fmt.Errorf("failed to update the user info in the database after removing chunks: %v", err)
+				}
+
+				// if no rows were affected, that just means there were no chunks that
+				// needed to be deleted, so no need to check the result.
 			}
 		}
-
-		// if no rows were affected, that just means there were no chunks that
-		// needed to be deleted, so no need to check the result.
 
 		return nil
 	})

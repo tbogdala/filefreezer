@@ -31,6 +31,7 @@ const (
 	testFilename1  = "testdata/unit_test_1.dat"
 	testFilename2  = "testdata/unit_test_2.dat"
 	testFilename3  = "testdata/subdir/unit_test_3.dat"
+	testFilename4  = "testdata/unit_test_empty.dat"
 )
 
 var (
@@ -394,7 +395,7 @@ func TestEverything(t *testing.T) {
 		t.Fatalf("Sync after regeneration should be newer for file %s (%d)", filename, syncStatus)
 	}
 	if ulCount != 3 {
-		t.Fatalf("The sync of the changed test file should have downloaded 3 chunks but it downloaded %d.", dlCount)
+		t.Fatalf("The sync of the changed test file should have downloaded 3 chunks but it uploaded %d.", ulCount)
 	}
 
 	// at this point we should have different allocation and revision
@@ -544,6 +545,41 @@ func TestEverything(t *testing.T) {
 	}
 	if syncdirCount != 3 {
 		t.Fatalf("Expected to upload 3 chunks worth of data, but only uploaded %d.", syncdirCount)
+	}
+
+	// create an empty test file to make sure empty files
+	os.Remove(testFilename4)
+	emptyFile, err := os.Create(testFilename4)
+	if err != nil {
+		t.Fatalf("Failed to create an empty file %s: %v", testFilename4, err)
+	}
+	emptyFile.Close()
+
+	// test to make sure we can sync the empty file
+	syncStatus, ulCount, err = cmdState.syncFile(testFilename4, testFilename4)
+	if err != nil {
+		t.Fatalf("Failed to sync the empty file %s to the server: %v", testFilename4, err)
+	}
+	if syncStatus != syncStatusLocalNewer {
+		t.Fatalf("Empty file sync should be newer for file %s (%d)", testFilename4, syncStatus)
+	}
+	if ulCount != 0 {
+		t.Fatalf("The sync of the empty test file should have uplodated zero chunks but it uploaded %d.", ulCount)
+	}
+
+	// remove the file
+	os.Remove(testFilename4)
+
+	// test downloading it through a sync
+	syncStatus, dlCount, err = cmdState.syncFile(testFilename4, testFilename4)
+	if err != nil {
+		t.Fatalf("Failed to sync the empty file %s from the server: %v", testFilename4, err)
+	}
+	if syncStatus != syncStatusRemoteNewer {
+		t.Fatalf("Empty file sync should be not newer for file %s (%d)", testFilename4, syncStatus)
+	}
+	if ulCount != 0 {
+		t.Fatalf("The sync of the empty test file should have downloaded zero chunks but it downloaded %d.", dlCount)
 	}
 
 }
