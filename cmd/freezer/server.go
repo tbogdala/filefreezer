@@ -6,8 +6,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
@@ -28,18 +28,6 @@ type serverState struct {
 	// Port is the port to listen to
 	Port int
 
-	// PublicKeyPath is the file path to the public crypto key
-	PublicKeyPath string
-
-	// PrivateKeyPath is the file path to the private crypto key
-	PrivateKeyPath string
-
-	// SignKey is the loaded crypto key for signing security tokens
-	SignKey []byte
-
-	// VerifyKey is the loaded crypto key for verifying security tokens
-	VerifyKey []byte
-
 	// Storage is the filefreezer storage object used to keep data
 	Storage *filefreezer.Storage
 
@@ -50,27 +38,9 @@ type serverState struct {
 
 // newState does the setup for the initial state of the server
 func newState() (*serverState, error) {
-	s := new(serverState)
-	s.PrivateKeyPath = *flagPrivateKeyPath
-	s.PublicKeyPath = *flagPublicKeyPath
-	s.DatabasePath = *flagDatabasePath
-
-	// load the private key
 	var err error
-	if s.PrivateKeyPath != "" {
-		s.SignKey, err = ioutil.ReadFile(s.PrivateKeyPath)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to read the private key (%s). %v", s.PrivateKeyPath, err)
-		}
-	}
-
-	// load the public key
-	if s.PublicKeyPath != "" {
-		s.VerifyKey, err = ioutil.ReadFile(s.PublicKeyPath)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to read the public key (%s). %v", s.PublicKeyPath, err)
-		}
-	}
+	s := new(serverState)
+	s.DatabasePath = *flagDatabasePath
 
 	// attempt to open the storage database
 	s.Storage, err = openStorage()
@@ -78,8 +48,21 @@ func newState() (*serverState, error) {
 		return nil, fmt.Errorf("Failed to open the database using the path specified (%s): %v", s.DatabasePath, err)
 	}
 
+	// generate a random passphrase for signing JWT if something wasn't specified
+	// on the command line as a flag; this will make the tokens only
+	// valid between the same running instance of the server
+	randomPassphrase := []byte(*flagCryptoPass)
+	if len(randomPassphrase) < 1 {
+		var randoms [32]byte
+		_, err = rand.Read(randoms[:])
+		if err != nil {
+			return nil, fmt.Errorf("A crypto password was not supplied and random generation failed: %v", err)
+		}
+		log.Println("JWT random passphrase generated.")
+	}
+
 	// assign the token generator
-	s.Authorizor, err = NewJWTAuthenticator(s.Storage, s.SignKey, s.VerifyKey)
+	s.Authorizor, err = NewJWTAuthenticator(s.Storage, randomPassphrase)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create the JWT token generator: %v", err)
 	}

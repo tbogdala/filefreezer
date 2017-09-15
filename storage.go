@@ -16,8 +16,9 @@ const (
 	createUsersTable = `CREATE TABLE Users (
         UserID 		INTEGER PRIMARY KEY	NOT NULL,
         Name		TEXT	UNIQUE		NOT NULL ON CONFLICT ABORT,
-        Salt		TEXT				NOT NULL,
-        Password	BLOB				NOT NULL
+		Salt		TEXT				NOT NULL,
+		Password	BLOB				NOT NULL,
+		CryptoHash  BLOB                
     );`
 
 	createUserStatsTable = `CREATE TABLE UserStats (
@@ -54,10 +55,11 @@ const (
         Chunk		BLOB				NOT NULL
     );`
 
-	lookupUserByName = `SELECT Name FROM Users WHERE Name = ?;`
-	addUser          = `INSERT INTO Users (Name, Salt, Password) VALUES (?, ?, ?);`
-	getUser          = `SELECT UserID, Salt, Password FROM Users  WHERE Name = ?;`
-	updateUser       = `UPDATE Users SET Name = ?, Salt = ?, Password = ? WHERE UserID = ?;`
+	lookupUserByName  = `SELECT Name FROM Users WHERE Name = ?;`
+	addUser           = `INSERT INTO Users (Name, Salt, Password) VALUES (?, ?, ?);`
+	getUser           = `SELECT UserID, Salt, Password, CryptoHash FROM Users  WHERE Name = ?;`
+	setUserCryptoHash = `UPDATE Users SET CryptoHash = (?) WHERE UserID = ?;`
+	updateUser        = `UPDATE Users SET Name = ?, Salt = ?, Password = ?, CryptoHash = ? WHERE UserID = ?;`
 
 	setUserStats    = `INSERT OR REPLACE INTO UserStats (UserID, Quota, Allocated, Revision) VALUES (?, ?, ?, ?);`
 	getUserStats    = `SELECT Quota, Allocated, Revision FROM UserStats WHERE UserID = ?;`
@@ -127,6 +129,7 @@ type User struct {
 	Name       string
 	Salt       string
 	SaltedHash []byte
+	CryptoHash []byte // a bcrypt hash used to verify the bcrypt hash of the crypto password
 }
 
 // UserStats contains the user specific state information to track data usage.
@@ -233,7 +236,6 @@ func (s *Storage) IsUsernameFree(username string) (bool, error) {
 // AddUser should create the user in the USERS table. The username should be unique.
 // saltedHash should be the combined password & salt hash and salt should be
 // the user specific generated salt.
-//
 // This function returns a true bool value if a user was created and false if
 // the user was not created (e.g. username was already taken).
 func (s *Storage) AddUser(username string, salt string, saltedHash []byte, quota int) (*User, error) {
@@ -279,7 +281,7 @@ func (s *Storage) AddUser(username string, salt string, saltedHash []byte, quota
 func (s *Storage) GetUser(username string) (*User, error) {
 	user := new(User)
 	user.Name = username
-	err := s.db.QueryRow(getUser, username).Scan(&user.ID, &user.Salt, &user.SaltedHash)
+	err := s.db.QueryRow(getUser, username).Scan(&user.ID, &user.Salt, &user.SaltedHash, &user.CryptoHash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get the user information from the database: %v", err)
 	}
@@ -303,10 +305,29 @@ func (s *Storage) RemoveUser(username string) error {
 	return nil
 }
 
-// UpdateUser changes the salt, saltedHash and quota for a given userID. This will fail
-// if the userID doesn't exist.
-func (s *Storage) UpdateUser(userID int, name string, salt string, saltedHash []byte, quota int) error {
-	res, err := s.db.Exec(updateUser, name, salt, saltedHash, userID)
+// UpdateUserCryptoHash changes the cryptoHash for a given userID.
+// This will fail if the userID doesn't exist.
+func (s *Storage) UpdateUserCryptoHash(userID int, cryptoHash []byte) error {
+	res, err := s.db.Exec(setUserCryptoHash, cryptoHash, userID)
+	if err != nil {
+		return fmt.Errorf("failed to update the user's cryptohash (%d): %v", userID, err)
+	}
+
+	// make sure one row was affected
+	affected, err := res.RowsAffected()
+	if affected != 1 {
+		return fmt.Errorf("failed to update user's cryptohash in the database; no rows were affected")
+	} else if err != nil {
+		return fmt.Errorf("failed to update user's cryptohash in the database: %v", err)
+	}
+
+	return nil
+}
+
+// UpdateUser changes the salt, saltedHash, cryptoHash and quota for a given userID.
+// This will fail if the userID doesn't exist.
+func (s *Storage) UpdateUser(userID int, name string, salt string, saltedHash []byte, cryptoHash []byte, quota int) error {
+	res, err := s.db.Exec(updateUser, name, salt, saltedHash, cryptoHash, userID)
 	if err != nil {
 		return fmt.Errorf("failed to update the user (%d): %v", userID, err)
 	}
@@ -897,10 +918,8 @@ func (s *Storage) GetMissingChunkNumbersForFile(userID int, fileID int) ([]int, 
 func (s *Storage) AddFileChunk(userID int, fileID int, versionID int, chunkNumber int, chunkHash string, chunk []byte) (*FileChunk, error) {
 	chunkLength := int64(len(chunk))
 
-	// sanity check the length of the chunk
-	if chunkLength > s.ChunkSize {
-		return nil, fmt.Errorf("chunk supplied is %d bytes long and the server is using a max size of %d", len(chunk), s.ChunkSize)
-	}
+	// the length of the chunk is no longer sanity checked because it may
+	// become larger with extra data needed for cryptography.
 
 	newChunk := new(FileChunk)
 	err := s.transact(func(tx *sql.Tx) error {

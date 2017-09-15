@@ -15,7 +15,20 @@ type ServerCapabilities struct {
 // /api/users/login POST handlder.
 type UserLoginResponse struct {
 	Token        string
+	CryptoHash   []byte
 	Capabilities ServerCapabilities
+}
+
+// UserCryptoHashUpdateRequest is the JSON serializable request sent to the
+// /api/user/cryptohash PUT handler.
+type UserCryptoHashUpdateRequest struct {
+	CryptoHash []byte
+}
+
+// UserCryptoHashUpdateResponse is the JSON serializable response given by the
+// /api/user/cryptohash PUT handler.
+type UserCryptoHashUpdateResponse struct {
+	Status bool
 }
 
 // UserStatsGetResponse is the JSON serializable response given by the

@@ -89,7 +89,10 @@ func (s *commandState) syncDirectory(localDir string, remoteDir string) (changeC
 
 	// sync all of the remote files
 	for _, remoteFileHash := range remoteFileHashes {
-		remoteFileName := remoteFileHash.FileName
+		remoteFileName, err := s.decryptString(remoteFileHash.FileName)
+		if err != nil {
+			return 0, fmt.Errorf("Failed to decrypt remote file name for file id %d: %v", remoteFileHash.FileID, err)
+		}
 
 		// skip the remote file if we don't start with the right prefix
 		if !strings.HasPrefix(remoteFileName, remoteDir) {
@@ -130,14 +133,9 @@ func (s *commandState) syncDirectory(localDir string, remoteDir string) (changeC
 }
 
 func (s *commandState) syncFile(localFilename string, remoteFilepath string) (status int, changeCount int, e error) {
-	var getReq models.FileGetByNameRequest
-	var remote models.FileGetResponse
-
 	// get the file information for the filename, which provides
 	// all of the information necessary to determine what to sync.
-	getReq.FileName = remoteFilepath
-	target := fmt.Sprintf("%s/api/file/name", s.hostURI)
-	body, err := runAuthRequest(target, "GET", s.authToken, getReq)
+	remote, err := s.getFileInfoByFilename(remoteFilepath)
 
 	// if the file is not registered with the storage server, then upload it ...
 	// futher checking will be unnecessary.
@@ -155,10 +153,6 @@ func (s *commandState) syncFile(localFilename string, remoteFilepath string) (st
 
 	// we got a valid response so the file is registered on the server;
 	// continue checking...
-	err = json.Unmarshal(body, &remote)
-	if err != nil {
-		return 0, 0, fmt.Errorf("Failed to get the file information for the file name given (%s): %v", remoteFilepath, err)
-	}
 
 	// if the local file doesn't exist then download the file from the server if
 	// it is registered there.
@@ -174,10 +168,16 @@ func (s *commandState) syncFile(localFilename string, remoteFilepath string) (st
 		return 0, 0, fmt.Errorf("Failed to calculate the file hash data for %s: %v", localFilename, err)
 	}
 
+	// pull the list of missing chunks for the file
+	remoteMissingChunks, err := s.getMissingChunksForFile(remote.FileID)
+	if err != nil {
+		return 0, 0, err
+	}
+
 	// lets prove that we don't need to do anything for some cases
 	// NOTE: a lastMod difference here doesn't trigger a difference if other metrics check out the same
 	// NOTE: a difference in permissions also doesn't trigger a difference
-	if localHash == remote.CurrentVersion.FileHash && len(remote.MissingChunks) == 0 && localChunkCount == remote.CurrentVersion.ChunkCount {
+	if localHash == remote.CurrentVersion.FileHash && len(remoteMissingChunks) == 0 && localChunkCount == remote.CurrentVersion.ChunkCount {
 		different := false
 		if *flagExtraStrict {
 			// now we get a chunk list for the file
@@ -237,7 +237,7 @@ func (s *commandState) syncFile(localFilename string, remoteFilepath string) (st
 
 	// there's been a difference detected in the files, but the mod times were the same, so
 	// we attempt to upload any missing chunks.
-	if len(remote.MissingChunks) > 0 {
+	if len(remoteMissingChunks) > 0 {
 		ulCount, e := s.syncUploadMissing(remote.FileID, remote.CurrentVersion.VersionID, localFilename, remoteFilepath, localChunkCount)
 		return syncStatusMissing, ulCount, e
 	}
@@ -261,14 +261,19 @@ func (s *commandState) syncFile(localFilename string, remoteFilepath string) (st
 func (s *commandState) syncUploadMissing(remoteID int, remoteVersionID int, filename string, remoteFilepath string, localChunkCount int) (uploadCount int, e error) {
 	// upload each chunk
 	err := forEachChunk(int(s.serverCapabilities.ChunkSize), filename, localChunkCount, func(i int, b []byte) (bool, error) {
-		// hash the chunk
+		// hash the chunk with unencrypted data
 		hasher := sha1.New()
 		hasher.Write(b)
 		hash := hasher.Sum(nil)
 		chunkHash := base64.URLEncoding.EncodeToString(hash)
 
+		cryptoBytes, err := s.encryptBytes(b)
+		if err != nil {
+			return false, fmt.Errorf("Failed to encrypt chunk before sending to the server: %v", err)
+		}
+
 		target := fmt.Sprintf("%s/api/chunk/%d/%d/%d/%s", s.hostURI, remoteID, remoteVersionID, i, chunkHash)
-		body, err := runAuthRequest(target, "PUT", s.authToken, b)
+		body, err := runAuthRequest(target, "PUT", s.authToken, cryptoBytes)
 		if err != nil {
 			return false, err
 		}
@@ -320,8 +325,13 @@ func (s *commandState) syncUploadNewer(remoteFileID int, filename string, remote
 		hash := hasher.Sum(nil)
 		chunkHash := base64.URLEncoding.EncodeToString(hash)
 
+		cryptoBytes, err := s.encryptBytes(b)
+		if err != nil {
+			return false, fmt.Errorf("Failed to encrypt chunk before sending to the server: %v", err)
+		}
+
 		target = fmt.Sprintf("%s/api/chunk/%d/%d/%d/%s", s.hostURI, fi.FileID, fi.CurrentVersion.VersionID, i, chunkHash)
-		body, err = runAuthRequest(target, "PUT", s.authToken, b)
+		body, err = runAuthRequest(target, "PUT", s.authToken, cryptoBytes)
 		if err != nil {
 			return false, err
 		}
@@ -346,9 +356,15 @@ func (s *commandState) syncUploadNewer(remoteFileID int, filename string, remote
 }
 
 func (s *commandState) syncUploadNew(filename string, remoteFilepath string, isDir bool, localPermissions uint32, localLastMod int64, localChunkCount int, localHash string) (uploadCount int, e error) {
+	// encrypt the remote filepath so that the server doesn't see the plaintext version
+	cryptoRemoteName, err := s.encryptString(remoteFilepath)
+	if err != nil {
+		return 0, fmt.Errorf("Could not encrypt the remote file name before uploading: %v", err)
+	}
+
 	// establish a new file on the remote freezer
 	var putReq models.FilePutRequest
-	putReq.FileName = remoteFilepath
+	putReq.FileName = cryptoRemoteName
 	putReq.IsDir = isDir
 	putReq.Permissions = localPermissions
 	putReq.LastMod = localLastMod
@@ -385,8 +401,13 @@ func (s *commandState) syncUploadNew(filename string, remoteFilepath string, isD
 		hash := hasher.Sum(nil)
 		chunkHash := base64.URLEncoding.EncodeToString(hash)
 
+		cryptoBytes, err := s.encryptBytes(b)
+		if err != nil {
+			return false, fmt.Errorf("Failed to encrypt chunk before sending to the server: %v", err)
+		}
+
 		target = fmt.Sprintf("%s/api/chunk/%d/%d/%d/%s", s.hostURI, remoteID, remoteVersionID, i, chunkHash)
-		body, err = runAuthRequest(target, "PUT", s.authToken, b)
+		body, err = runAuthRequest(target, "PUT", s.authToken, cryptoBytes)
 		if err != nil {
 			return false, err
 		}
@@ -434,7 +455,12 @@ func (s *commandState) syncDownload(remoteID int, remoteVersionID int, filename 
 
 		// write out the chunk that was downloaded
 		chunk := chunkResp.Chunk.Chunk
-		_, err = localFile.Write(chunk)
+		uncryptoBytes, err := s.decryptBytes(chunk)
+		if err != nil {
+			return chunksWritten, fmt.Errorf("Failed to decrypt the the chunk bytes: %v", err)
+		}
+
+		_, err = localFile.Write(uncryptoBytes)
 		if err != nil {
 			return chunksWritten, fmt.Errorf("Failed to write to the #%d chunk to the local file %s: %v", i, filename, err)
 		}

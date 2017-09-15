@@ -13,21 +13,42 @@ import (
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
 )
 
-func (s *commandState) rmFile(filename string) error {
-	var getReq models.FileGetByNameRequest
-	getReq.FileName = filename
-
-	// get the file id for the filename provided
-	target := fmt.Sprintf("%s/api/file/name", s.hostURI)
-	body, err := runAuthRequest(target, "GET", s.authToken, getReq)
-	var fi models.FileGetResponse
-	err = json.Unmarshal(body, &fi)
+// getFileInfoByFilename takes the long way of finding a FileInfo object
+// by scanning all FileInfo objects registered for a given user. If a matching
+// file is found it is returned and the error value will be null; otherwise
+// an error will be set.
+func (s *commandState) getFileInfoByFilename(filename string) (foundFile filefreezer.FileInfo, e error) {
+	// get the entire file info list so that we can go through each file info
+	// and find the right one for a given filename.
+	// NOTE: implemented like this to support encrypted filenames.
+	allFileInfos, err := s.getAllFileHashes()
 	if err != nil {
-		return fmt.Errorf("Failed to get the file information for the file name given (%s): %v", filename, err)
+		return foundFile, err
 	}
 
-	target = fmt.Sprintf("%s/api/file/%d", s.hostURI, fi.FileID)
-	body, err = runAuthRequest(target, "DELETE", s.authToken, nil)
+	// iterate through all of the files
+	for _, fi := range allFileInfos {
+		decryptedFilename, err := s.decryptString(fi.FileName)
+		if err != nil {
+			return foundFile, err
+		}
+
+		if decryptedFilename == filename {
+			return fi, nil
+		}
+	}
+
+	return foundFile, fmt.Errorf("could not find the file: %s", filename)
+}
+
+func (s *commandState) rmFile(filename string) error {
+	fi, err := s.getFileInfoByFilename(filename)
+	if err != nil {
+		return err
+	}
+
+	target := fmt.Sprintf("%s/api/file/%d", s.hostURI, fi.FileID)
+	_, err = runAuthRequest(target, "DELETE", s.authToken, nil)
 	if err != nil {
 		return fmt.Errorf("Failed to remove the file %s: %v", filename, err)
 	}
@@ -37,9 +58,27 @@ func (s *commandState) rmFile(filename string) error {
 	return nil
 }
 
-func (s *commandState) addFile(fileName string, remoteFilepath string, isDir bool, permissions uint32, lastMod int64, chunkCount int, fileHash string) (fi filefreezer.FileInfo, err error) {
+func (s *commandState) rmFileByID(fileID int) error {
+	target := fmt.Sprintf("%s/api/file/%d", s.hostURI, fileID)
+	_, err := runAuthRequest(target, "DELETE", s.authToken, nil)
+	if err != nil {
+		return fmt.Errorf("Failed to remove the file by file ID (%d): %v", fileID, err)
+	}
+
+	log.Printf("Removed file by ID: %d\n", fileID)
+
+	return nil
+}
+
+func (s *commandState) addFile(filename string, remoteFilepath string, isDir bool, permissions uint32, lastMod int64, chunkCount int, fileHash string) (fi filefreezer.FileInfo, err error) {
+	// encrypt the remote filepath so that the server doesn't see the plaintext version
+	cryptoRemoteName, err := s.encryptString(remoteFilepath)
+	if err != nil {
+		return fi, fmt.Errorf("Could not encrypt the remote file name before uploading: %v", err)
+	}
+
 	var putReq models.FilePutRequest
-	putReq.FileName = remoteFilepath
+	putReq.FileName = cryptoRemoteName
 	putReq.LastMod = lastMod
 	putReq.ChunkCount = chunkCount
 	putReq.FileHash = fileHash
@@ -61,27 +100,20 @@ func (s *commandState) addFile(fileName string, remoteFilepath string, isDir boo
 	}
 
 	// we've registered the file, so now we should sync it
-	_, _, err = s.syncFile(fileName, remoteFilepath)
+	_, _, err = s.syncFile(filename, remoteFilepath)
 
 	return putResp.FileInfo, err
 }
 
 func (s *commandState) getFileVersions(filename string) (versionIDs []int, versionNums []int, err error) {
-	var getReq models.FileGetByNameRequest
-	getReq.FileName = filename
-
-	// get the file id for the filename provided
-	target := fmt.Sprintf("%s/api/file/name", s.hostURI)
-	body, err := runAuthRequest(target, "GET", s.authToken, getReq)
-	var fi models.FileGetResponse
-	err = json.Unmarshal(body, &fi)
+	fi, err := s.getFileInfoByFilename(filename)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to get the file information for the file name given (%s): %v", filename, err)
+		return nil, nil, err
 	}
 
 	// get the file id for the filename provided
-	target = fmt.Sprintf("%s/api/file/%d/versions", s.hostURI, fi.FileID)
-	body, err = runAuthRequest(target, "GET", s.authToken, nil)
+	target := fmt.Sprintf("%s/api/file/%d/versions", s.hostURI, fi.FileID)
+	body, err := runAuthRequest(target, "GET", s.authToken, nil)
 	var r models.FileGetAllVersionsResponse
 	err = json.Unmarshal(body, &r)
 	if err != nil {
@@ -97,4 +129,17 @@ func (s *commandState) getFileVersions(filename string) (versionIDs []int, versi
 	}
 
 	return r.VersionIDs, r.VersionNumbers, nil
+}
+
+func (s *commandState) getMissingChunksForFile(fileID int) ([]int, error) {
+	// get the file id for the filename provided
+	target := fmt.Sprintf("%s/api/file/%d", s.hostURI, fileID)
+	body, err := runAuthRequest(target, "GET", s.authToken, nil)
+	var r models.FileGetResponse
+	err = json.Unmarshal(body, &r)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get the file's missing chunk list: %v", err)
+	}
+
+	return r.MissingChunks, nil
 }

@@ -63,6 +63,7 @@ func (s *commandState) authenticate(hostURI, username, password string) error {
 	// authentication was successful so update the command state
 	s.hostURI = hostURI
 	s.authToken = userLogin.Token
+	s.cryptoHash = userLogin.CryptoHash
 	s.serverCapabilities = userLogin.Capabilities
 
 	return nil

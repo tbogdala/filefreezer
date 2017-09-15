@@ -6,12 +6,22 @@ package filefreezer
 import (
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/subtle"
+	"strconv"
+	"strings"
+
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io/ioutil"
 	"os"
 
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/crypto/scrypt"
+)
+
+const (
+	defaultPasswordCost = 10 // analogus to bcrypt's DefaultCost
 )
 
 // CalcFileHashInfo takes the file name and calculates the number of chunks, last modified time
@@ -47,16 +57,17 @@ func CalcFileHashInfo(maxChunkSize int64, filename string) (chunkCount int, last
 	return
 }
 
-// GenSaltedHash takes the user password, generates a new random salt,
+// GenLoginPasswordHash takes the user password, generates a new random salt,
 // then generates a hash from the salted password combination.
-func GenSaltedHash(unsaltedPassword string) (salt string, saltedhash []byte, err error) {
+func GenLoginPasswordHash(unsaltedPassword string) (salt string, saltedhash []byte, err error) {
 	// generate a 32 byte salt
 	salt, err = getSalt(32)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to generate salt for salted password: %v", err)
 	}
 
-	saltedhash, err = bcrypt.GenerateFromPassword([]byte(unsaltedPassword+salt), bcrypt.DefaultCost)
+	// technically, bcrypt does its own salting. This is just double salt or maybe some pepper.
+	saltedhash, err = bcrypt.GenerateFromPassword([]byte(unsaltedPassword+salt), defaultPasswordCost)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to generate hash for salted password: %v", err)
 	}
@@ -64,10 +75,10 @@ func GenSaltedHash(unsaltedPassword string) (salt string, saltedhash []byte, err
 	return
 }
 
-// VerifyPassword takes the user-supplied unsalted password and the stored salt and hash
+// VerifyLoginPassword takes the user-supplied unsalted password and the stored salt and hash
 // and verifies that the supplied unsalted password is the correct match. Returns true on
 // match and false on fail.
-func VerifyPassword(unsaltedPassowrd string, salt string, saltedHash []byte) bool {
+func VerifyLoginPassword(unsaltedPassowrd string, salt string, saltedHash []byte) bool {
 	err := bcrypt.CompareHashAndPassword(saltedHash, []byte(unsaltedPassowrd+salt))
 	if err == nil {
 		return true
@@ -85,4 +96,86 @@ func getSalt(n int) (string, error) {
 	}
 
 	return base64.URLEncoding.EncodeToString(b), nil
+}
+
+// GenCryptoPasswordHash takes the user password then generates a crytpo hash. If makeKeyHash
+// is false, only the key parameter is generated. If keyHashOpts is not an empty string,
+// it attempts to split the string by '$' dividers for scrypt parameters. NOTE: it's
+// intended that keyHashOpts will be the keyHashCombo return value of a previous call.
+func GenCryptoPasswordHash(password string, makeKeyHash bool, keyHashOpts string) (key []byte, keyHash []byte, keyHashCombo string, err error) {
+	// scrypt parameters
+	n := 16384 * 2 * 2 * 2 // CPU/memory cost parameter (logN)
+	r := 8                 // block size parameter (octets)
+	p := 1                 // parallelisation parameter (positive int)
+	salt := make([]byte, 16)
+
+	// override these if keyHashOpts is supplied so that the same salt and settings
+	// are used to generate keys.
+	if keyHashOpts != "" {
+		vals := strings.Split(keyHashOpts, "$")
+		n, err = strconv.Atoi(vals[0])
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("failed to parse the crypto password hashing 'n' option: %v", err)
+		}
+
+		r, err = strconv.Atoi(vals[1])
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("failed to parse the crypto password hashing 'r' option: %v", err)
+		}
+
+		p, err = strconv.Atoi(vals[2])
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("failed to parse the crypto password hashing 'p' option: %v", err)
+		}
+
+		salt, err = hex.DecodeString(vals[3])
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("failed to parse the crypto password hashing salt: %v", err)
+		}
+	} else {
+		// no salt provided so we must farm our own from the random fields
+		_, err = rand.Read(salt)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("failed to get random salt bytes: %v", err)
+		}
+	}
+
+	key, err = scrypt.Key([]byte(password), salt, n, r, p, 32)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("failed to generate the key for crypto password: %v", err)
+	}
+
+	if makeKeyHash {
+		keyHash, err = scrypt.Key(key, salt, n, r, p, 32)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("failed to generate the key hash for crypto password: %v", err)
+		}
+
+		keyHashCombo = fmt.Sprintf("%d$%d$%d$%x$%x", n, r, p, salt, keyHash)
+	}
+
+	return
+}
+
+// VerifyCryptoPassword takes a plain text password and compares it against a hash
+// of the crypto key to verify that the password is correct and the crypto key is
+// the correct one. On success and successful match a non-nil []byte slice is returned.
+// If the keys do not match nil is returned. Otherwise an non-nil error is returned.
+func VerifyCryptoPassword(password string, keyHashCombo string) ([]byte, error) {
+	key, keyHash, _, err := GenCryptoPasswordHash(password, true, keyHashCombo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate the crypto key to check against the stored hash: %v", err)
+	}
+
+	vals := strings.Split(keyHashCombo, "$")
+	storedKeyHash, err := hex.DecodeString(vals[4])
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse the stored crypto key hash: %v", err)
+	}
+
+	if subtle.ConstantTimeCompare(storedKeyHash, keyHash) != 1 {
+		return nil, nil
+	}
+
+	return key, nil
 }

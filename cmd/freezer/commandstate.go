@@ -13,6 +13,13 @@ type commandState struct {
 	// the authentication token returned after logging in
 	authToken string
 
+	// the stored crypto hash for the client that is used
+	// to verify the client-entered password.
+	cryptoHash []byte
+
+	// the key used for cryptography
+	cryptoKey []byte
+
 	// the capabilities returned by the authenticated server
 	serverCapabilities models.ServerCapabilities
 }

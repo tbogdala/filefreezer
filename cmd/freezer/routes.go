@@ -27,6 +27,9 @@ func InitRoutes(state *serverState) *mux.Router {
 	// returns the authenticated users's current stats such as quota, allocation and revision counts
 	r.Handle("/api/user/stats", authenticateToken(state, handleGetUserStats(state))).Methods("GET")
 
+	// updates the user's crypto hash used to verify the user-entered password client-side.
+	r.Handle("/api/user/cryptohash", authenticateToken(state, handlePutUserCryptoHash(state))).Methods("PUT")
+
 	// returns all files and their whole-file hash
 	r.Handle("/api/files", authenticateToken(state, handleGetAllFiles(state))).Methods("GET")
 
@@ -38,9 +41,6 @@ func InitRoutes(state *serverState) *mux.Router {
 
 	// returns a file information response with missing chunk list
 	r.Handle("/api/file/{fileid:[0-9]+}", authenticateToken(state, handleGetFile(state))).Methods("GET")
-
-	// returns a file information response with missing chunk list -- same as /api/file/{fileid} but for filenames
-	r.Handle("/api/file/name", authenticateToken(state, handleGetFileByName(state))).Methods("GET")
 
 	// handles registering a new file version for a given file id
 	r.Handle("/api/file/{fileid:[0-9]+}/versions", authenticateToken(state, handleGetAllFileVersion(state))).Methods("Get")
@@ -93,10 +93,49 @@ func handleUsersLogin(state *serverState) http.HandlerFunc {
 		}
 
 		writeJSONResponse(w, &models.UserLoginResponse{
-			Token: token,
+			Token:      token,
+			CryptoHash: user.CryptoHash,
 			Capabilities: models.ServerCapabilities{
 				ChunkSize: *flagServeChunkSize,
 			},
+		})
+	}
+}
+
+// handlePutUserCryptoHash updates a user's crypto hash which can be used to verify a
+// client side entered password.
+func handlePutUserCryptoHash(state *serverState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
+		if userCredsI == nil {
+			http.Error(w, "Failed to get the user credentials.", http.StatusUnauthorized)
+			return
+		}
+		userCreds := userCredsI.(*userCredentialsContext)
+
+		// deserialize the JSON object that should be in the request body
+		var req models.UserCryptoHashUpdateRequest
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read the request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		err = json.Unmarshal(body, &req)
+		if err != nil {
+			http.Error(w, "Failed to parse the request as a JSON object: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// set the new crypto hash for the user
+		err = state.Storage.UpdateUserCryptoHash(userCreds.ID, req.CryptoHash)
+		if err != nil {
+			http.Error(w, "Failed to update the user's crypto hash information for the authenticated user.", http.StatusInternalServerError)
+			return
+		}
+
+		writeJSONResponse(w, &models.UserCryptoHashUpdateResponse{
+			Status: true,
 		})
 	}
 }
@@ -149,52 +188,6 @@ func handleGetAllFiles(state *serverState) http.HandlerFunc {
 
 		writeJSONResponse(w, &models.AllFilesGetResponse{
 			Files: allFileInfos,
-		})
-	}
-}
-
-// handleGetFileByName returns a JSON object with all of the FileInfo data for the file in Storage
-// as well as a slice of missing chunks, if any.
-func handleGetFileByName(state *serverState) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		userCredsI := ctx.Value(userCredentialsContextKey("UserCredentials"))
-		if userCredsI == nil {
-			http.Error(w, "Failed to get the user credentials.", http.StatusUnauthorized)
-			return
-		}
-		userCreds := userCredsI.(*userCredentialsContext)
-
-		// deserialize the JSON object that should be in the request body
-		var req models.FileGetByNameRequest
-		body, err := ioutil.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "Failed to read the request body: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		err = json.Unmarshal(body, &req)
-		if err != nil {
-			http.Error(w, "Failed to parse the request as a JSON object: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		// pull down the fileinfo object for a file ID
-		fi, err := state.Storage.GetFileInfoByName(userCreds.ID, req.FileName)
-		if err != nil {
-			http.Error(w, "Failed to get file for the user.", http.StatusNotFound)
-			return
-		}
-
-		// get all of the missing chunks
-		missingChunks, err := state.Storage.GetMissingChunkNumbersForFile(userCreds.ID, fi.FileID)
-		if err != nil {
-			http.Error(w, "Failed to get the missing chunks for the file.", http.StatusBadRequest)
-			return
-		}
-
-		writeJSONResponse(w, &models.FileGetResponse{
-			FileInfo:      *fi,
-			MissingChunks: missingChunks,
 		})
 	}
 }
@@ -368,7 +361,8 @@ func handlePutFileChunk(state *serverState) http.HandlerFunc {
 		}
 
 		// get a byte limited reader, set to the maximum chunk size supported by Storage
-		bodyReader := http.MaxBytesReader(w, r.Body, state.Storage.ChunkSize)
+		// plus a little extra space for cryptography information
+		bodyReader := http.MaxBytesReader(w, r.Body, state.Storage.ChunkSize+128)
 		defer bodyReader.Close()
 		chunk, err := ioutil.ReadAll(bodyReader)
 		if err != nil {

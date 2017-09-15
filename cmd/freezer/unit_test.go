@@ -72,8 +72,8 @@ func TestMain(m *testing.M) {
 	*flagServeChunkSize = 1024 * 1024 * 4
 	*flagExtraStrict = true
 	*argServeListenAddr = testServerAddr
-	*flagPublicKeyPath = "freezer.rsa.pub"
-	*flagPrivateKeyPath = "freezer.rsa"
+	*flagCryptoPass = "beavers_and_ducks"
+
 	if useHTTPS {
 		setupHTTPSTestFlags()
 	} else {
@@ -127,6 +127,15 @@ func TestEverything(t *testing.T) {
 	}
 	if cmdState.serverCapabilities.ChunkSize != *flagServeChunkSize {
 		t.Fatalf("Server capabilities returned a different chunk size than configured for the test: %d", *flagServeChunkSize)
+	}
+
+	err = cmdState.setCryptoHashForPassword(*flagCryptoPass)
+	if err != nil {
+		t.Fatalf("Failed to set the crypto password for the test user: %v", err)
+	}
+	cmdState.cryptoKey, err = filefreezer.VerifyCryptoPassword(*flagCryptoPass, string(cmdState.cryptoHash))
+	if err != nil {
+		t.Fatalf("Failed to set the crypto key for the test user: %v", err)
 	}
 
 	// getting the user stats now should have default quota and otherwise empty settings
@@ -412,13 +421,17 @@ func TestEverything(t *testing.T) {
 	}
 	missingAliasedFile := true
 	for _, fileData := range allFiles {
-		if strings.Compare(fileData.FileName, aliasedFilename) == 0 {
+		decryptedRemoteFilename, err := cmdState.decryptString(fileData.FileName)
+		if err != nil {
+			t.Fatalf("Failed to decrypt the remote filename: %v", err)
+		}
+		if strings.Compare(decryptedRemoteFilename, aliasedFilename) == 0 {
 			missingAliasedFile = false
 			break
 		}
 	}
 	if missingAliasedFile {
-		t.Fatalf("Alised file (%s) didn't show up in the file hash list.", aliasedFilename)
+		t.Fatalf("Aliased file (%s) didn't show up in the file hash list.", aliasedFilename)
 	}
 
 	// remove the aliased file and make sure the allocation count decreases by the same amount
@@ -556,6 +569,15 @@ func TestFileVersioning(t *testing.T) {
 		t.Fatalf("Failed to authenticate as the test user: %v", err)
 	}
 
+	err = cmdState.setCryptoHashForPassword(*flagCryptoPass)
+	if err != nil {
+		t.Fatalf("Failed to set the crypto password for the test user: %v", err)
+	}
+	cmdState.cryptoKey, err = filefreezer.VerifyCryptoPassword(*flagCryptoPass, string(cmdState.cryptoHash))
+	if err != nil {
+		t.Fatalf("Failed to set the crypto key for the test user: %v", err)
+	}
+
 	// make sure to remove any files from storage
 	err = removeAllFilesFromStorage(cmdState)
 	if err != nil {
@@ -612,7 +634,7 @@ func TestFileVersioning(t *testing.T) {
 	}
 
 	// make sure the user quota updated correctly
-	bytesAllocated += len(rando1)
+	bytesAllocated += len(rando1) + 28*3 // bonus crypto for each chunk
 	userStats, err := cmdState.getUserStats()
 	if err != nil {
 		t.Fatalf("Failed to get the user stats for the test user: %v", err)
@@ -660,7 +682,7 @@ func TestFileVersioning(t *testing.T) {
 	}
 
 	// make sure the user quota updated correctly
-	bytesAllocated += len(rando1)
+	bytesAllocated += len(rando1) + 28*3 // bonus crypto for each chunk
 	userStats, err = cmdState.getUserStats()
 	if err != nil {
 		t.Fatalf("Failed to get the user stats for the test user: %v", err)
@@ -701,7 +723,7 @@ func TestFileVersioning(t *testing.T) {
 	}
 
 	// make sure the user quota updated correctly
-	bytesAllocated += len(rando1)
+	bytesAllocated += len(rando1) + 28*3 // bonus crypto for each chunk
 	userStats, err = cmdState.getUserStats()
 	if err != nil {
 		t.Fatalf("Failed to get the user stats for the test user: %v", err)
@@ -742,7 +764,7 @@ func TestFileVersioning(t *testing.T) {
 	}
 
 	// make sure the user quota updated correctly
-	bytesAllocated += len(rando1)
+	bytesAllocated += len(rando1) + 28*6 // bonus crypto for each chunk
 	userStats, err = cmdState.getUserStats()
 	if err != nil {
 		t.Fatalf("Failed to get the user stats for the test user: %v", err)
@@ -783,7 +805,7 @@ func TestFileVersioning(t *testing.T) {
 	}
 
 	// make sure the user quota updated correctly
-	bytesAllocated += len(rando1)
+	bytesAllocated += len(rando1) + 28*2 // bonus crypto for each chunk
 	userStats, err = cmdState.getUserStats()
 	if err != nil {
 		t.Fatalf("Failed to get the user stats for the test user: %v", err)
@@ -802,9 +824,9 @@ func removeAllFilesFromStorage(cmdState *commandState) error {
 
 	// for each remote file, execute a remove function
 	for _, fileHash := range allRemoteFiles {
-		err = cmdState.rmFile(fileHash.FileName)
+		err = cmdState.rmFileByID(fileHash.FileID)
 		if err != nil {
-			return fmt.Errorf("Failed to remove the remote files %s: %v", fileHash.FileName, err)
+			return fmt.Errorf("Failed to remove the remote file id %d: %v", fileHash.FileID, err)
 		}
 	}
 

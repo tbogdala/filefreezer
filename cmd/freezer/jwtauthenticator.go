@@ -4,7 +4,6 @@
 package main
 
 import (
-	"crypto/rsa"
 	"fmt"
 	"net/http"
 	"time"
@@ -18,18 +17,16 @@ import (
 type JWTAuthenticator struct {
 	Storage      *filefreezer.Storage
 	TokenTimeout time.Duration
-	privKey      *rsa.PrivateKey
-	pubKey       *rsa.PublicKey
+	passphrase   []byte
 }
 
 // NewJWTAuthenticator creates a new JWTAuthenticator object to sign tokens.
-func NewJWTAuthenticator(storage *filefreezer.Storage, signKey []byte, verifyKey []byte) (*JWTAuthenticator, error) {
+func NewJWTAuthenticator(storage *filefreezer.Storage, passphrase []byte) (*JWTAuthenticator, error) {
 	var err error
 	ta := new(JWTAuthenticator)
 	ta.Storage = storage
 	ta.TokenTimeout = time.Minute * 20
-	ta.privKey, err = jwt.ParseRSAPrivateKeyFromPEM(signKey)
-	ta.pubKey, err = jwt.ParseRSAPublicKeyFromPEM(verifyKey)
+	ta.passphrase = passphrase
 	if err != nil {
 		return nil, fmt.Errorf("Failed to generate the authentication private rsa key: %v", err)
 	}
@@ -46,7 +43,7 @@ func (auth *JWTAuthenticator) VerifyPassword(username, password string) (*filefr
 		return nil, fmt.Errorf("Could not find user in the database")
 	}
 
-	verified := filefreezer.VerifyPassword(password, user.Salt, user.SaltedHash)
+	verified := filefreezer.VerifyLoginPassword(password, user.Salt, user.SaltedHash)
 	if !verified {
 		return nil, fmt.Errorf("could not verify the user against the stored salted hash")
 	}
@@ -64,7 +61,7 @@ type UserClaims struct {
 // GenerateToken makes a JWT token for the username specified
 func (auth *JWTAuthenticator) GenerateToken(username string, userID int) (string, error) {
 	// create a signer for RSA256
-	gen := jwt.New(jwt.GetSigningMethod("RS256"))
+	gen := jwt.New(jwt.SigningMethodHS256)
 	gen.Claims = &UserClaims{
 		&jwt.StandardClaims{
 			ExpiresAt: time.Now().Add(auth.TokenTimeout).Unix(),
@@ -74,7 +71,7 @@ func (auth *JWTAuthenticator) GenerateToken(username string, userID int) (string
 	}
 
 	// make the token string to return
-	token, err := gen.SignedString(auth.privKey)
+	token, err := gen.SignedString(auth.passphrase)
 	if err != nil {
 		return "", fmt.Errorf("Failed to generate the authentication token. %v", err)
 	}
@@ -88,9 +85,8 @@ func (auth *JWTAuthenticator) GenerateToken(username string, userID int) (string
 func (auth *JWTAuthenticator) VerifyToken(r *http.Request) (*jwt.Token, error) {
 	// validate the token
 	token, err := jwtrequest.ParseFromRequestWithClaims(r, jwtrequest.OAuth2Extractor, &UserClaims{}, func(token *jwt.Token) (interface{}, error) {
-		// since we only use the one private key to sign the tokens,
-		// we also only use its public counter part to verify
-		return auth.pubKey, nil
+		// since we only use a symmetric key for JWT sign/verify, just return it here
+		return auth.passphrase, nil
 	})
 
 	// If the token is missing or invalid, return error

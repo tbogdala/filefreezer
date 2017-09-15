@@ -15,13 +15,14 @@ import (
 // addUser adds a user to the database using the username, password and quota provided.
 // The store object will take care of generating the salt and salted password.
 func (s *commandState) addUser(store *filefreezer.Storage, username string, password string, quota int) *filefreezer.User {
-	// generate the salt and salted password hash
-	salt, saltedPass, err := filefreezer.GenSaltedHash(password)
+	// generate the salt and salted login password hash
+	salt, saltedPass, err := filefreezer.GenLoginPasswordHash(password)
 	if err != nil {
 		log.Fatalf("Failed to generate a password hash %v", err)
 	}
 
-	// add the user to the database
+	// add the user to the database with CryptoHash empty as that will be
+	// set by the client.
 	user, err := store.AddUser(username, salt, saltedPass, quota)
 	if err != nil {
 		log.Fatalf("Failed to create the user %s: %v", username, err)
@@ -64,7 +65,7 @@ func (s *commandState) modUser(store *filefreezer.Storage, username string, newQ
 	updatedSalt := user.Salt
 	updatedSaltedHash := user.SaltedHash
 	if newPassword != "" {
-		updatedSalt, updatedSaltedHash, err = filefreezer.GenSaltedHash(newPassword)
+		updatedSalt, updatedSaltedHash, err = filefreezer.GenLoginPasswordHash(newPassword)
 		if err != nil {
 			log.Fatalf("Failed to generate a password hash %v", err)
 		}
@@ -75,8 +76,9 @@ func (s *commandState) modUser(store *filefreezer.Storage, username string, newQ
 		updatedQuota = newQuota
 	}
 
-	// update the user in the database
-	err = store.UpdateUser(user.ID, updatedName, updatedSalt, updatedSaltedHash, updatedQuota)
+	// update the user in the database ... but don't update CryptoHash. that's only done client side
+	// and through the web API.
+	err = store.UpdateUser(user.ID, updatedName, updatedSalt, updatedSaltedHash, user.CryptoHash, updatedQuota)
 	if err != nil {
 		log.Fatalf("Failed to modify the user %s: %v", username, err)
 	}
@@ -117,4 +119,32 @@ func (s *commandState) getAllFileHashes() ([]filefreezer.FileInfo, error) {
 	}
 
 	return allFiles.Files, nil
+}
+
+func (s *commandState) setCryptoHashForPassword(cryptoPassword string) error {
+	// first we derive the crypto password bytes that are derived from the password text
+	_, _, combinedHashString, err := filefreezer.GenCryptoPasswordHash(cryptoPassword, true, "")
+	if err != nil {
+		return fmt.Errorf("Failed to generate the cryptography key from the password: %v", err)
+	}
+
+	var putReq models.UserCryptoHashUpdateRequest
+	putReq.CryptoHash = []byte(combinedHashString)
+
+	// get the file id for the filename provided
+	target := fmt.Sprintf("%s/api/user/cryptohash", s.hostURI)
+	body, err := runAuthRequest(target, "PUT", s.authToken, putReq)
+	var r models.UserCryptoHashUpdateResponse
+	err = json.Unmarshal(body, &r)
+	if err != nil {
+		return fmt.Errorf("Failed to set the user's cryptography password hash: %v", err)
+	}
+
+	if r.Status != true {
+		return fmt.Errorf("an unknown error occurred while updating the cryptography password")
+	}
+
+	s.cryptoHash = putReq.CryptoHash
+	log.Printf("Hash of cryptography password updated successfully.")
+	return nil
 }

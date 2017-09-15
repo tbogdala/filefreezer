@@ -78,6 +78,28 @@ func TestQuotasAndPermissions(t *testing.T) {
 		t.Fatalf("Failed to set the user quota for (id:%d): %v", user.ID, err)
 	}
 
+	// initial user cryptoHash should be initialized to a byte slice of {}
+	if bytes.Compare(user.CryptoHash, []byte{}) != 0 {
+		t.Fatalf("Bad default cryptoHash for the user in the database: %v", user.CryptoHash)
+	}
+
+	// test updating the crypto hash for the user
+	cryptoBytes := make([]byte, 32)
+	_, err = rand.Read(cryptoBytes)
+	if err != nil {
+		t.Fatalf("Failed to get random bytes for test: %v", err)
+	}
+	store.UpdateUserCryptoHash(user.ID, cryptoBytes)
+
+	// read back the user information and make sure we updated it
+	user, err = store.GetUser("admin")
+	if err != nil {
+		t.Fatalf("Failed to get the user: %v", err)
+	}
+	if bytes.Compare(user.CryptoHash, cryptoBytes) != 0 {
+		t.Fatalf("Failed ot update the user's cryptoHash in the database.")
+	}
+
 	filename := "../storage.go"
 	chunkCount, lastMod, permissions, hashString, err := filefreezer.CalcFileHashInfo(store.ChunkSize, filename)
 	if err != nil {
@@ -176,7 +198,7 @@ func TestBasicDBCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create the admin3 test user: %v", err)
 	}
-	err = store.UpdateUser(user3.ID, "admin3", "5678", []byte{5, 6, 7, 8}, 10)
+	err = store.UpdateUser(user3.ID, "admin3", "5678", []byte{5, 6, 7, 8}, []byte{0}, 10)
 	if err != nil {
 		t.Fatalf("Failed to update the user password and quota data: %v", err)
 	}
@@ -874,7 +896,7 @@ func TestFileVersioning(t *testing.T) {
 // it's easier to add multiple users.
 func setupTestUser(store *filefreezer.Storage, username string, password string, t *testing.T) {
 	// attempt to add a user
-	salt, saltedPass, err := filefreezer.GenSaltedHash(password)
+	salt, saltedPass, err := filefreezer.GenLoginPasswordHash(password)
 	if err != nil {
 		t.Fatalf("Failed to generate a password hash %v", err)
 	}
@@ -892,13 +914,13 @@ func setupTestUser(store *filefreezer.Storage, username string, password string,
 		t.Fatalf("Failed to get the correct user (%s) info from storage: \n\t%s | %v\n\t%s | %v",
 			username, userDupe.Salt, userDupe.SaltedHash, salt, saltedPass)
 	}
-	if !filefreezer.VerifyPassword(password, userDupe.Salt, userDupe.SaltedHash) {
+	if !filefreezer.VerifyLoginPassword(password, userDupe.Salt, userDupe.SaltedHash) {
 		t.Fatalf("Password verification failed for user (%s) with stored salt and hash.", username)
 	}
 
 	// make sure password verification fails with some change to the salted hash
 	bogusHash := bytes.Repeat([]byte{42}, 42)
-	if filefreezer.VerifyPassword(password, userDupe.Salt, bogusHash) {
+	if filefreezer.VerifyLoginPassword(password, userDupe.Salt, bogusHash) {
 		t.Fatalf("Password verification failed for user (%s) with stored salt and hash.", username)
 	}
 
