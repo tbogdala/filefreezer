@@ -88,6 +88,8 @@ Known Bugs and Limitations
 * starting a remote sync target name with '/' in win32/msys2 attempts to autocomplete
   the string as a path and not give the desired results.
 
+* cmd/frezer serve doesn't enforce auth token lifetime yet.
+
 TODO / Notes
 ------------
 
@@ -100,9 +102,7 @@ TODO / Notes
   * ref: https://crackstation.net/hashing-security.htm
 
 * flag: file hashing algo
-* flag: encrypt files
 * flag: hash on start instead of just checking mod time
-* flag: verbosity level
 * flag: safetey level for database -- currently it is tuned to be very safe,
   but a non-zero chance of db corruption on power loss or crash. docs for
   sqlite say "in practice, you are more likely to suffer a catastrophic disk failure 

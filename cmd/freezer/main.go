@@ -32,6 +32,7 @@ var (
 	flagCryptoPass   = appFlags.Flag("crypt", "The passwod used for cryptography.").Short('s').String()
 	flagHost         = appFlags.Flag("host", "The host URL for the server to contact.").Short('h').String()
 	flagCPUProfile   = appFlags.Flag("cpuprofile", "Turns on cpu profiling and stores the result in the file specified by this flag.").String()
+	flagQuiet        = appFlags.Flag("quiet", "Turns off non-fatal error console output for the command.").Bool()
 
 	cmdServe           = appFlags.Command("serve", "Adds a new user to the storage.")
 	argServeListenAddr = cmdServe.Arg("http", "The net address to listen to").Default(":8080").String()
@@ -74,9 +75,41 @@ var (
 	argSyncDirTarget = cmdSyncDir.Arg("target", "The directory path to sync to on the server; defaults to the same as the filename arg.").Default("").String()
 )
 
+func logPrintln(v ...interface{}) {
+	if *flagQuiet {
+		return
+	}
+
+	log.Println(v...)
+}
+
+func logPrintf(format string, v ...interface{}) {
+	if *flagQuiet {
+		return
+	}
+
+	log.Printf(format, v...)
+}
+
+func fmtPrintln(v ...interface{}) {
+	if *flagQuiet {
+		return
+	}
+
+	fmt.Println(v...)
+}
+
+func fmtPrintf(format string, v ...interface{}) {
+	if *flagQuiet {
+		return
+	}
+
+	fmt.Printf(format, v...)
+}
+
 // openStorage is the common function used to open the filefreezer Storage
 func openStorage() (*filefreezer.Storage, error) {
-	log.Printf("Opening database: %s\n", *flagDatabasePath)
+	logPrintf("Opening database: %s\n", *flagDatabasePath)
 
 	// open up the storage database
 	store, err := filefreezer.NewStorage(*flagDatabasePath)
@@ -105,9 +138,9 @@ func interactiveGetLoginPassword() string {
 
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Password: ")
-	//fmt.Println("\033[8m") // Hide input
+	//fmtPrintln("\033[8m") // Hide input
 	password, _ := reader.ReadString('\n')
-	//fmt.Println("\033[28m") // Show input
+	//fmtPrintln("\033[28m") // Show input
 
 	return strings.TrimSpace(password)
 }
@@ -115,9 +148,9 @@ func interactiveGetLoginPassword() string {
 func interactiveGetCryptoPassword() string {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Cryptography password: ")
-	//fmt.Println("\033[8m") // Hide input
+	//fmtPrintln("\033[8m") // Hide input
 	password, _ := reader.ReadString('\n')
-	//fmt.Println("\033[28m") // Show input
+	//fmtPrintln("\033[28m") // Show input
 
 	return strings.TrimSpace(password)
 }
@@ -162,39 +195,39 @@ func initCrypto(cmdState *commandState) error {
 
 func interactiveFirstTimeSetCryptoPassword() string {
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Println("The cryptography password has not been set for this account.")
-	fmt.Println("Filefreezer will encrypt all data before sending it to the server, but")
-	fmt.Println("it needs a password to encrypt with. Please enter a secure passphrase")
-	fmt.Println("below, but keep in mind that the software will have no way of recovering")
-	fmt.Println("encrypted data from the server if this password is lost.")
+	fmtPrintln("The cryptography password has not been set for this account.")
+	fmtPrintln("Filefreezer will encrypt all data before sending it to the server, but")
+	fmtPrintln("it needs a password to encrypt with. Please enter a secure passphrase")
+	fmtPrintln("below, but keep in mind that the software will have no way of recovering")
+	fmtPrintln("encrypted data from the server if this password is lost.")
 
 	var password1, password2 string
 	verified := false
 	for !verified {
-		fmt.Println("")
+		fmtPrintln("")
 		fmt.Print("Cryptography password: ")
-		//fmt.Println("\033[8m") // Hide input
+		//fmtPrintln("\033[8m") // Hide input
 		password1, _ = reader.ReadString('\n')
 		password1 = strings.TrimSpace(password1)
-		//fmt.Println("\033[28m") // Show input
+		//fmtPrintln("\033[28m") // Show input
 
 		// special sanity check to avoid empty passwords
 		if password1 == "" {
-			fmt.Println("An empty cryptography password cannot be used!")
+			fmtPrintln("An empty cryptography password cannot be used!")
 			continue
 		}
 
 		fmt.Print("Verify cryptography password: ")
-		//fmt.Println("\033[8m") // Hide inputde
+		//fmtPrintln("\033[8m") // Hide inputde
 		password2, _ = reader.ReadString('\n')
 		password2 = strings.TrimSpace(password2)
-		//fmt.Println("\033[28m") // Show input
+		//fmtPrintln("\033[28m") // Show input
 
 		// make sure the user entered the same password twice
 		if strings.Compare(password1, password2) == 0 {
 			verified = true
 		} else {
-			fmt.Println("Cryptography passwords did not match. Try again.")
+			fmtPrintln("Cryptography passwords did not match. Try again.")
 		}
 	}
 
@@ -223,17 +256,17 @@ func interactiveGetHost() string {
 }
 
 func main() {
-	fmt.Println("Filefreezer Copyright (C) 2017 by Timothy Bogdala <tdb@animal-machine.com>")
-	fmt.Println("This program comes with ABSOLUTELY NO WARRANTY. This is free software")
-	fmt.Println("and you are welcome to redistribute it under certain conditions.")
-	fmt.Println("")
-
 	parsedFlags := kingpin.MustParse(appFlags.Parse(os.Args[1:]))
 	rand.Seed(time.Now().UnixNano())
 
+	fmtPrintln("Filefreezer Copyright (C) 2017 by Timothy Bogdala <tdb@animal-machine.com>")
+	fmtPrintln("This program comes with ABSOLUTELY NO WARRANTY. This is free software")
+	fmtPrintln("and you are welcome to redistribute it under certain conditions.")
+	fmtPrintln("")
+
 	// potentially enable cpu profiling
 	if *flagCPUProfile != "" {
-		fmt.Printf("Enabling CPU Profiling!\n")
+		fmtPrintf("Enabling CPU Profiling!\n")
 		cpuPprofF, err := os.Create(*flagCPUProfile)
 		if err != nil {
 			log.Fatal(err)
@@ -322,10 +355,10 @@ func main() {
 			log.Fatalf("Failed to get all of the files for the user %s from the storage server %s: %v", username, host, err)
 		}
 
-		log.Printf("Registered files for %s:\n", username)
-		log.Println(strings.Repeat("=", 22+len(username)))
-		log.Println("FileID   | VerNum   | Flags    | Filename")
-		log.Println(strings.Repeat("-", 41))
+		logPrintf("Registered files for %s:\n", username)
+		logPrintln(strings.Repeat("=", 22+len(username)))
+		logPrintln("FileID   | VerNum   | Flags    | Filename")
+		logPrintln(strings.Repeat("-", 41))
 
 		var builder bytes.Buffer
 		for _, fi := range allFiles {
@@ -339,11 +372,11 @@ func main() {
 
 			decryptedFilename, err := cmdState.decryptString(fi.FileName)
 			if err != nil {
-				log.Printf("Failed to decrypt filename for file id %d: %v", fi.FileID, err)
+				logPrintf("Failed to decrypt filename for file id %d: %v", fi.FileID, err)
 			}
 
 			builder.WriteString(fmt.Sprintf("%s", decryptedFilename))
-			log.Println(builder.String())
+			logPrintln(builder.String())
 		}
 
 	case cmdGetFileVersions.FullCommand():
@@ -399,7 +432,7 @@ func main() {
 			log.Fatalf("Failed to register the file on the server %s: %v", host, err)
 		}
 
-		log.Printf("File added (FileId: %d | VersionID: %d): %s\n", fileInfo.FileID, fileInfo.CurrentVersion.VersionID, filepath)
+		logPrintf("File added (FileId: %d | VersionID: %d): %s\n", fileInfo.FileID, fileInfo.CurrentVersion.VersionID, filepath)
 
 	case cmdRmFile.FullCommand():
 		cmdState := newCommandState()

@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
 	"strings"
 
@@ -142,7 +141,7 @@ func (s *commandState) syncFile(localFilename string, remoteFilepath string) (st
 	if err != nil {
 		localChunkCount, localLastMod, localPerms, localHash, err := filefreezer.CalcFileHashInfo(s.serverCapabilities.ChunkSize, localFilename)
 		if err != nil {
-			return syncStatusMissing, 0, fmt.Errorf("Failed to calculate the file hash data for %s: %v", localFilename, err)
+			return syncStatusMissing, 0, fmt.Errorf("Failed to calculate the file hash data for file %s to upload as %s: %v", localFilename, remoteFilepath, err)
 		}
 		ulCount, err := s.syncUploadNew(localFilename, remoteFilepath, false, localPerms, localLastMod, localChunkCount, localHash)
 		if err != nil {
@@ -165,7 +164,7 @@ func (s *commandState) syncFile(localFilename string, remoteFilepath string) (st
 	// calculate some of the local file information
 	localChunkCount, localLastMod, localPermissions, localHash, err := filefreezer.CalcFileHashInfo(s.serverCapabilities.ChunkSize, localFilename)
 	if err != nil {
-		return 0, 0, fmt.Errorf("Failed to calculate the file hash data for %s: %v", localFilename, err)
+		return 0, 0, fmt.Errorf("Failed to calculate the local file hash data for %s: %v", localFilename, err)
 	}
 
 	// pull the list of missing chunks for the file
@@ -217,7 +216,7 @@ func (s *commandState) syncFile(localFilename string, remoteFilepath string) (st
 
 		// after whole-file hashs and all chunk hashs match, we can feel safe in saying they're not different
 		if !different {
-			log.Printf("%s --- unchanged", remoteFilepath)
+			logPrintf("%s --- unchanged", remoteFilepath)
 			return syncStatusSame, 0, nil
 		}
 	}
@@ -284,7 +283,7 @@ func (s *commandState) syncUploadMissing(remoteID int, remoteVersionID int, file
 			return false, fmt.Errorf("Failed to upload the chunk to the server: %v", err)
 		}
 
-		log.Printf("%s +++ %d / %d", remoteFilepath, i+1, localChunkCount)
+		logPrintf("%s +++ %d / %d", remoteFilepath, i+1, localChunkCount)
 		uploadCount++
 
 		return true, nil
@@ -342,7 +341,7 @@ func (s *commandState) syncUploadNewer(remoteFileID int, filename string, remote
 			return false, fmt.Errorf("Failed to upload the chunk to the server: %v", err)
 		}
 
-		log.Printf("%s >>> %d / %d", remoteFilepath, i+1, localChunkCount)
+		logPrintf("%s >>> %d / %d", remoteFilepath, i+1, localChunkCount)
 		uploadCount++
 
 		return true, nil
@@ -418,7 +417,7 @@ func (s *commandState) syncUploadNew(filename string, remoteFilepath string, isD
 			return false, fmt.Errorf("Failed to upload the chunk to the server: %v", err)
 		}
 
-		log.Printf("%s >>> %d / %d", remoteFilepath, i+1, localChunkCount)
+		logPrintf("%s >>> %d / %d", remoteFilepath, i+1, localChunkCount)
 		uploadCount++
 
 		return true, nil
@@ -427,7 +426,7 @@ func (s *commandState) syncUploadNew(filename string, remoteFilepath string, isD
 		return uploadCount, fmt.Errorf("Failed to upload the local file chunk for %s: %v", filename, err)
 	}
 
-	log.Printf("%s ==> uploaded", remoteFilepath)
+	logPrintf("%s ==> uploaded", remoteFilepath)
 	return uploadCount, nil
 }
 
@@ -465,10 +464,10 @@ func (s *commandState) syncDownload(remoteID int, remoteVersionID int, filename 
 			return chunksWritten, fmt.Errorf("Failed to write to the #%d chunk to the local file %s: %v", i, filename, err)
 		}
 
-		log.Printf("%s <<< %d / %d", remoteFilepath, i+1, chunkCount)
+		logPrintf("%s <<< %d / %d", remoteFilepath, i+1, chunkCount)
 		chunksWritten++
 	}
 
-	log.Printf("%s <== downloaded", remoteFilepath)
+	logPrintf("%s <== downloaded", remoteFilepath)
 	return chunksWritten, nil
 }

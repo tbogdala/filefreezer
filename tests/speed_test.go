@@ -79,7 +79,7 @@ func doBenchFileWrite(dbPath string, chunkSize int, b *testing.B) {
 
 	// loop: create a file with one chunk and upload the chunk
 	for n := 0; n < b.N; n++ {
-		fi, err := store.AddFileInfo(user.ID, fmt.Sprintf("TestFile_%8d.dat", n), false, 0777, modTime, 1, hashString)
+		fi, err := store.AddFileInfo(user.ID, fmt.Sprintf("TestFile_%08d.dat", n), false, 0777, modTime, 1, hashString)
 		if err != nil {
 			b.Fatalf("Failed to add a test file for iteration %d: %v", n, err)
 		}
@@ -102,7 +102,7 @@ func BenchmarkBasicChunkReadMemory4MB(b *testing.B) {
 func BenchmarkBasicChunkReadFilesystem4KB(b *testing.B) {
 	const filename = "read_bench1.db"
 	os.Remove(filename)
-	doBenchReadChunk(filename, 1024*1024*4, b)
+	doBenchReadChunk(filename, 1024*4, b)
 	os.Remove(filename)
 }
 

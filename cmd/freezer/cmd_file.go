@@ -6,7 +6,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/tbogdala/filefreezer"
@@ -23,7 +22,7 @@ func (s *commandState) getFileInfoByFilename(filename string) (foundFile filefre
 	// NOTE: implemented like this to support encrypted filenames.
 	allFileInfos, err := s.getAllFileHashes()
 	if err != nil {
-		return foundFile, err
+		return foundFile, fmt.Errorf("failed to getall of the file hashes: %v", err)
 	}
 
 	// iterate through all of the files
@@ -53,7 +52,7 @@ func (s *commandState) rmFile(filename string) error {
 		return fmt.Errorf("Failed to remove the file %s: %v", filename, err)
 	}
 
-	log.Printf("Removed file: %s\n", filename)
+	logPrintf("Removed file: %s\n", filename)
 
 	return nil
 }
@@ -65,7 +64,7 @@ func (s *commandState) rmFileByID(fileID int) error {
 		return fmt.Errorf("Failed to remove the file by file ID (%d): %v", fileID, err)
 	}
 
-	log.Printf("Removed file by ID: %d\n", fileID)
+	logPrintf("Removed file by ID: %d\n", fileID)
 
 	return nil
 }
@@ -120,12 +119,12 @@ func (s *commandState) getFileVersions(filename string) (versionIDs []int, versi
 		return nil, nil, fmt.Errorf("Failed to get the file versions: %v", err)
 	}
 
-	log.Printf("Registered versions for %s:\n", filename)
-	log.Println(strings.Repeat("=", 25+len(filename)))
+	logPrintf("Registered versions for %s:\n", filename)
+	logPrintln(strings.Repeat("=", 25+len(filename)))
 
 	// loop through all of the results and print them
 	for i, vID := range r.VersionIDs {
-		log.Printf("Version ID: %d\t\tNumber: %d", vID, r.VersionNumbers[i])
+		logPrintf("Version ID: %d\t\tNumber: %d", vID, r.VersionNumbers[i])
 	}
 
 	return r.VersionIDs, r.VersionNumbers, nil

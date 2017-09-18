@@ -29,7 +29,7 @@ const (
 func CalcFileHashInfo(maxChunkSize int64, filename string) (chunkCount int, lastMod int64, permissions uint32, hashString string, e error) {
 	fileInfo, err := os.Stat(filename)
 	if err != nil {
-		e = fmt.Errorf("failed to stat the local file (%s) for the test", filename)
+		e = fmt.Errorf("failed to stat the local file (%s) for the test: %v", filename, err)
 		return
 	}
 

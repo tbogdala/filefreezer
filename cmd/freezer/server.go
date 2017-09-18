@@ -58,7 +58,7 @@ func newState() (*serverState, error) {
 		if err != nil {
 			return nil, fmt.Errorf("A crypto password was not supplied and random generation failed: %v", err)
 		}
-		log.Println("JWT random passphrase generated.")
+		logPrintln("JWT random passphrase generated.")
 	}
 
 	// assign the token generator
@@ -67,7 +67,7 @@ func newState() (*serverState, error) {
 		return nil, fmt.Errorf("Failed to create the JWT token generator: %v", err)
 	}
 
-	log.Printf("Database opened: %s\n", s.DatabasePath)
+	logPrintf("Database opened: %s\n", s.DatabasePath)
 	return s, nil
 }
 
@@ -94,7 +94,7 @@ func (state *serverState) serve(readyCh chan bool) {
 		d := time.Now().Add(5 * time.Second) // deadline 5s max
 		ctx, cancel := context.WithDeadline(context.Background(), d)
 		defer cancel()
-		log.Println("Shutting down server...")
+		logPrintln("Shutting down server...")
 		if err := httpServer.Shutdown(ctx); err != nil {
 			log.Fatalf("could not shutdown: %v", err)
 		}
@@ -107,17 +107,17 @@ func (state *serverState) serve(readyCh chan bool) {
 
 	var err error
 	if len(*flagTLSCrt) < 1 || len(*flagTLSKey) < 1 {
-		log.Printf("Starting http server on %s ...", *argServeListenAddr)
+		logPrintf("Starting http server on %s ...", *argServeListenAddr)
 		err = httpServer.ListenAndServe()
 	} else {
-		log.Printf("Starting https server on %s ...", *argServeListenAddr)
+		logPrintf("Starting https server on %s ...", *argServeListenAddr)
 		err = http2.ConfigureServer(httpServer, nil)
 		if err != nil {
-			log.Printf("Unable to enable HTTP/2 for the server: %v", err)
+			logPrintf("Unable to enable HTTP/2 for the server: %v", err)
 		}
 		err = httpServer.ListenAndServeTLS(*flagTLSCrt, *flagTLSKey)
 	}
 	if err != nil && err != http.ErrServerClosed {
-		log.Printf("There was an error while running the HTTP server: %v", err)
+		logPrintf("There was an error while running the HTTP server: %v", err)
 	}
 }

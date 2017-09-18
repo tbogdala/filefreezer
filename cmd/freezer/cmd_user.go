@@ -26,9 +26,10 @@ func (s *commandState) addUser(store *filefreezer.Storage, username string, pass
 	user, err := store.AddUser(username, salt, saltedPass, quota)
 	if err != nil {
 		log.Fatalf("Failed to create the user %s: %v", username, err)
+		return nil
 	}
 
-	log.Println("User created successfully")
+	logPrintln("User created successfully")
 	return user
 }
 
@@ -40,7 +41,7 @@ func (s *commandState) rmUser(store *filefreezer.Storage, username string) error
 		log.Fatalf("Failed to remove the user %s: %v", username, err)
 	}
 
-	log.Println("User removed successfully")
+	logPrintln("User removed successfully")
 	return nil
 }
 
@@ -83,7 +84,7 @@ func (s *commandState) modUser(store *filefreezer.Storage, username string, newQ
 		log.Fatalf("Failed to modify the user %s: %v", username, err)
 	}
 
-	log.Println("User modified successfully")
+	logPrintln("User modified successfully")
 }
 
 func (s *commandState) getUserStats() (stats filefreezer.UserStats, e error) {
@@ -97,9 +98,9 @@ func (s *commandState) getUserStats() (stats filefreezer.UserStats, e error) {
 		return
 	}
 
-	log.Printf("Quota:     %v\n", r.Stats.Quota)
-	log.Printf("Allocated: %v\n", r.Stats.Allocated)
-	log.Printf("Revision:  %v\n", r.Stats.Revision)
+	logPrintf("Quota:     %v\n", r.Stats.Quota)
+	logPrintf("Allocated: %v\n", r.Stats.Allocated)
+	logPrintf("Revision:  %v\n", r.Stats.Revision)
 
 	stats = r.Stats
 	return
@@ -145,6 +146,6 @@ func (s *commandState) setCryptoHashForPassword(cryptoPassword string) error {
 	}
 
 	s.cryptoHash = putReq.CryptoHash
-	log.Printf("Hash of cryptography password updated successfully.")
+	logPrintf("Hash of cryptography password updated successfully.")
 	return nil
 }
