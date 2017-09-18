@@ -73,8 +73,6 @@ Known Bugs and Limitations
 
 * Empty directories do not get synced. 
 
-* Files of length 0 currently fail to sync.
-
 * Consider a quota for max fileinfo registered so service cannot be DDOS'd 
   by registering infinite files.
 
