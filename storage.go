@@ -164,6 +164,20 @@ func NewStorage(dbPath string) (*Storage, error) {
 		return nil, fmt.Errorf("could not ping the open database (%s): %v", dbPath, err)
 	}
 
+	// enable write-ahead logging for sqlite tx journaling
+	// (about 5x write perf increase for smaller writes for databases on the filesystem)
+	_, err = db.Exec("PRAGMA main.journal_mode=WAL;")
+	if err != nil {
+		return nil, fmt.Errorf("Failed to set the journal_mode pragma: %v", err)
+	}
+
+	// enable NORMAL mode instead of the default FULL mode for fs sync
+	// (about 30x write perf increase for smaller writes for databases on the filesystem)
+	_, err = db.Exec("PRAGMA main.synchronous=NORMAL;")
+	if err != nil {
+		return nil, fmt.Errorf("Failed to set the synchronous pragma: %v", err)
+	}
+
 	s := new(Storage)
 	s.db = db
 	s.ChunkSize = 1024 * 1024 * 4 // 4MB
@@ -520,7 +534,7 @@ func (s *Storage) AddFileInfo(userID int, filename string, isDir bool, permissio
 
 	err := s.transact(func(tx *sql.Tx) error {
 		// attempt to first add to the FileInfo table
-		res, err := s.db.Exec(addFileInfo, userID, filename, isDir, newVersionNumber, userID, filename)
+		res, err := tx.Exec(addFileInfo, userID, filename, isDir, newVersionNumber, userID, filename)
 		if err != nil {
 			return fmt.Errorf("failed to add a new file info in the database: %v", err)
 		}
@@ -540,7 +554,7 @@ func (s *Storage) AddFileInfo(userID int, filename string, isDir bool, permissio
 		}
 
 		// now create a new FileVersion entry
-		res, err = s.db.Exec(addFileVersion, newFileID, newVersionNumber, permissions, lastMod, chunkCount, fileHash)
+		res, err = tx.Exec(addFileVersion, newFileID, newVersionNumber, permissions, lastMod, chunkCount, fileHash)
 		if err != nil {
 			return fmt.Errorf("failed to add a new file version in the database: %v", err)
 		}
@@ -559,7 +573,7 @@ func (s *Storage) AddFileInfo(userID int, filename string, isDir bool, permissio
 		}
 
 		// update the original new file info object with the versionID just created
-		res, err = s.db.Exec(setFileCurrentVersion, newVersionID, newFileID)
+		res, err = tx.Exec(setFileCurrentVersion, newVersionID, newFileID)
 		if err != nil {
 			return fmt.Errorf("failed to update the new file version in the database: %v", err)
 		}
@@ -598,40 +612,50 @@ func (s *Storage) AddFileInfo(userID int, filename string, isDir bool, permissio
 // GetAllUserFileInfos returns a slice of UserFileInfo objects that describe all known
 // files in storage for a given user ID. If this query was unsuccessful and error is returned.
 func (s *Storage) GetAllUserFileInfos(userID int) ([]FileInfo, error) {
-	rows, err := s.db.Query(getAllUserFiles, userID)
+	var result []FileInfo
+	err := s.transact(func(tx *sql.Tx) error {
+		rows, err := tx.Query(getAllUserFiles, userID)
+		if err != nil {
+			return fmt.Errorf("failed to get all of the file infos from the database: %v", err)
+		}
+		defer rows.Close()
+
+		// iterate over the returned rows to create a new slice of file info objects
+		allFileInfos := []FileInfo{}
+		for rows.Next() {
+			var fi FileInfo
+			err := rows.Scan(&fi.FileID, &fi.FileName, &fi.IsDir, &fi.CurrentVersion.VersionID)
+			if err != nil {
+				return fmt.Errorf("failed to scan the next row while processing user file infos: %v", err)
+			}
+			fi.UserID = userID
+			allFileInfos = append(allFileInfos, fi)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("failed to scan all of the search results for a user's file infos: %v", err)
+		}
+
+		// an early Close() call on the result which should be harmless
+		rows.Close()
+
+		// now that the base of the FileInfo slice is built, iterate over it and pull the current version data
+		result = make([]FileInfo, 0, len(allFileInfos))
+		for _, fi := range allFileInfos {
+			err = tx.QueryRow(getFileVersionByID, fi.CurrentVersion.VersionID).Scan(&fi.CurrentVersion.VersionNumber,
+				&fi.CurrentVersion.Permissions, &fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
+			if err != nil {
+				return fmt.Errorf("failed to get the current file version the database: %v", err)
+			}
+
+			result = append(result, fi)
+		}
+
+		return nil
+	})
+
+	// if the tx failed, then return here
 	if err != nil {
-		return nil, fmt.Errorf("failed to get all of the file infos from the database: %v", err)
-	}
-	defer rows.Close()
-
-	// iterate over the returned rows to create a new slice of file info objects
-	allFileInfos := []FileInfo{}
-	for rows.Next() {
-		var fi FileInfo
-		err := rows.Scan(&fi.FileID, &fi.FileName, &fi.IsDir, &fi.CurrentVersion.VersionID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan the next row while processing user file infos: %v", err)
-		}
-		fi.UserID = userID
-		allFileInfos = append(allFileInfos, fi)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed to scan all of the search results for a user's file infos: %v", err)
-	}
-
-	// an early Close() call on the result which should be harmless
-	rows.Close()
-
-	// now that the base of the FileInfo slice is built, iterate over it and pull the current version data
-	result := make([]FileInfo, 0, len(allFileInfos))
-	for _, fi := range allFileInfos {
-		err = s.db.QueryRow(getFileVersionByID, fi.CurrentVersion.VersionID).Scan(&fi.CurrentVersion.VersionNumber,
-			&fi.CurrentVersion.Permissions, &fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get the current file version the database: %v", err)
-		}
-
-		result = append(result, fi)
+		return nil, err
 	}
 
 	return result, nil
@@ -680,21 +704,28 @@ func (s *Storage) GetFileInfo(userID int, fileID int) (*FileInfo, error) {
 func (s *Storage) GetFileInfoByName(userID int, filename string) (*FileInfo, error) {
 	fi := new(FileInfo)
 
-	// pull the basic file information
-	err := s.db.QueryRow(getFileInfoByName, filename, userID).Scan(&fi.FileID, &fi.IsDir, &fi.CurrentVersion.VersionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get the current file info the database: %v", err)
-	}
-	fi.FileName = filename
-	fi.UserID = userID
+	err := s.transact(func(tx *sql.Tx) error {
+		// pull the basic file information
+		err := tx.QueryRow(getFileInfoByName, filename, userID).Scan(&fi.FileID, &fi.IsDir, &fi.CurrentVersion.VersionID)
+		if err != nil {
+			return fmt.Errorf("failed to get the current file info the database: %v", err)
+		}
+		fi.FileName = filename
+		fi.UserID = userID
 
-	// pull the current version data
-	err = s.db.QueryRow(getFileVersionByID, fi.CurrentVersion.VersionID).Scan(&fi.CurrentVersion.VersionNumber,
-		&fi.CurrentVersion.Permissions, &fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get the current file version the database: %v", err)
-	}
+		// pull the current version data
+		err = tx.QueryRow(getFileVersionByID, fi.CurrentVersion.VersionID).Scan(&fi.CurrentVersion.VersionNumber,
+			&fi.CurrentVersion.Permissions, &fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
+		if err != nil {
+			return fmt.Errorf("failed to get the current file version the database: %v", err)
+		}
 
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
 	return fi, nil
 }
 
@@ -874,7 +905,7 @@ func (s *Storage) GetMissingChunkNumbersForFile(userID int, fileID int) ([]int, 
 		fi.FileID = fileID
 
 		// pull the current version data to get the correct chunk count for the current version
-		err = s.db.QueryRow(getFileVersionByID, fi.CurrentVersion.VersionID).Scan(&fi.CurrentVersion.VersionNumber,
+		err = tx.QueryRow(getFileVersionByID, fi.CurrentVersion.VersionID).Scan(&fi.CurrentVersion.VersionNumber,
 			&fi.CurrentVersion.Permissions, &fi.CurrentVersion.LastMod, &fi.CurrentVersion.ChunkCount, &fi.CurrentVersion.FileHash)
 		if err != nil {
 			return fmt.Errorf("failed to get the current file version the database: %v", err)

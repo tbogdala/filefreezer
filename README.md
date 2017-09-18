@@ -103,6 +103,11 @@ TODO / Notes
 * flag: encrypt files
 * flag: hash on start instead of just checking mod time
 * flag: verbosity level
+* flag: safetey level for database -- currently it is tuned to be very safe,
+  but a non-zero chance of db corruption on power loss or crash. docs for
+  sqlite say "in practice, you are more likely to suffer a catastrophic disk failure 
+  or some other unrecoverable hardware fault" but this should be tunable
+  via command line.
 
 * make sure it only adds files automatically, not symlinks
 

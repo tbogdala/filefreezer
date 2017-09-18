@@ -51,15 +51,15 @@ func BenchmarkBasicFileWriteMemory4KB(b *testing.B) {
 	doBenchFileWrite("file::memory:?mode=memory&cache=shared", 1024*4, b)
 }
 
+func BenchmarkBasicFileWriteMemory4MB(b *testing.B) {
+	doBenchFileWrite("file::memory:?mode=memory&cache=shared", 1024*1024*4, b)
+}
+
 func BenchmarkBasicFileWriteFilesystem4KB(b *testing.B) {
 	const filename = "write_bench1.db"
 	os.Remove(filename)
 	doBenchFileWrite(filename, 1024*4, b)
 	os.Remove(filename)
-}
-
-func BenchmarkBasicFileWriteMemory4MB(b *testing.B) {
-	doBenchFileWrite("file::memory:?mode=memory&cache=shared", 1024*1024*4, b)
 }
 
 func BenchmarkBasicFileWriteFilesystem4MB(b *testing.B) {
@@ -95,15 +95,15 @@ func BenchmarkBasicChunkReadMemory4KB(b *testing.B) {
 	doBenchReadChunk("file::memory:?mode=memory&cache=shared", 1024*4, b)
 }
 
+func BenchmarkBasicChunkReadMemory4MB(b *testing.B) {
+	doBenchReadChunk("file::memory:?mmode=memory&cache=shared", 1024*4, b)
+}
+
 func BenchmarkBasicChunkReadFilesystem4KB(b *testing.B) {
 	const filename = "read_bench1.db"
 	os.Remove(filename)
 	doBenchReadChunk(filename, 1024*1024*4, b)
 	os.Remove(filename)
-}
-
-func BenchmarkBasicChunkReadMemory4MB(b *testing.B) {
-	doBenchReadChunk("file::memory:?mmode=memory&cache=shared", 1024*4, b)
 }
 
 func BenchmarkBasicChunkReadFilesystem4MB(b *testing.B) {
