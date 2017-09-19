@@ -9,5 +9,6 @@ cmd/freezer/freezer.key
 cmd/freezer/freezer.crt
 cmd/freezer/freezer.exe
 cmd/freezer/*.db*
+cmd/freezer/freezer.test*
 cmd/freezer/testdata
 tests/*.dat

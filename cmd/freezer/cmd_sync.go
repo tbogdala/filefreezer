@@ -446,14 +446,8 @@ func (s *commandState) syncDownload(remoteID int, remoteVersionID int, filename 
 			return chunksWritten, fmt.Errorf("Failed to get the file chunk #%d for file id%d: %v", i, remoteID, err)
 		}
 
-		var chunkResp models.FileChunkGetResponse
-		err = json.Unmarshal(body, &chunkResp)
-		if err != nil {
-			return chunksWritten, fmt.Errorf("Failed to get the file chunk #%d for file id%d: %v", i, remoteID, err)
-		}
-
 		// write out the chunk that was downloaded
-		chunk := chunkResp.Chunk.Chunk
+		chunk := body
 		uncryptoBytes, err := s.decryptBytes(chunk)
 		if err != nil {
 			return chunksWritten, fmt.Errorf("Failed to decrypt the the chunk bytes: %v", err)

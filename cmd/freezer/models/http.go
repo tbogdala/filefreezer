@@ -91,12 +91,6 @@ type FileChunksGetResponse struct {
 	Chunks []filefreezer.FileChunk
 }
 
-// FileChunkGetResponse is the JSON serializable response given by the
-// /api/chunk/{fileid}/{versionID}/{chunknumber} GET handlder.
-type FileChunkGetResponse struct {
-	Chunk filefreezer.FileChunk
-}
-
 // FilePutResponse is the JSON serializable response given by the
 // /api/files PUT handlder.
 type FilePutResponse struct {

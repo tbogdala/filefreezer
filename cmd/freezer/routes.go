@@ -51,7 +51,7 @@ func InitRoutes(state *serverState) *mux.Router {
 	// put a file chunk
 	r.Handle("/api/chunk/{fileid:[0-9]+}/{versionID:[0-9]+}/{chunknumber:[0-9]+}/{chunkhash}", authenticateToken(state, handlePutFileChunk(state))).Methods("PUT")
 
-	// get a file chunk
+	// get a file chunk and returns the raw bytes of the encrypted chunk data
 	r.Handle("/api/chunk/{fileid:[0-9]+}/{versionID:[0-9]+}/{chunknumber:[0-9]+}", authenticateToken(state, handleGetFileChunk(state))).Methods("GET")
 
 	// get all known file chunks (except the chunks themselves)
@@ -467,9 +467,13 @@ func handleGetFileChunk(state *serverState) http.HandlerFunc {
 			return
 		}
 
-		writeJSONResponse(w, &models.FileChunkGetResponse{
-			Chunk: *chunk,
-		})
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", strconv.Itoa(len(chunk.Chunk)))
+		_, err = w.Write(chunk.Chunk)
+		if err != nil {
+			http.Error(w, "Failed to write the file chunk as a response.", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
