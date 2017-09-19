@@ -69,41 +69,6 @@ func (s *commandState) rmFileByID(fileID int) error {
 	return nil
 }
 
-func (s *commandState) addFile(filename string, remoteFilepath string, isDir bool, permissions uint32, lastMod int64, chunkCount int, fileHash string) (fi filefreezer.FileInfo, err error) {
-	// encrypt the remote filepath so that the server doesn't see the plaintext version
-	cryptoRemoteName, err := s.encryptString(remoteFilepath)
-	if err != nil {
-		return fi, fmt.Errorf("Could not encrypt the remote file name before uploading: %v", err)
-	}
-
-	var putReq models.FilePutRequest
-	putReq.FileName = cryptoRemoteName
-	putReq.LastMod = lastMod
-	putReq.ChunkCount = chunkCount
-	putReq.FileHash = fileHash
-	putReq.IsDir = isDir
-	putReq.Permissions = permissions
-
-	target := fmt.Sprintf("%s/api/files", s.hostURI)
-	body, err := runAuthRequest(target, "POST", s.authToken, putReq)
-	if err != nil {
-		return fi, err
-	}
-
-	// if the POST fails or the response is bad, then the file wasn't registered
-	// with the freezer, so there's nothing to rollback -- just return.
-	var putResp models.FilePutResponse
-	err = json.Unmarshal(body, &putResp)
-	if err != nil {
-		return fi, err
-	}
-
-	// we've registered the file, so now we should sync it
-	_, _, err = s.syncFile(filename, remoteFilepath)
-
-	return putResp.FileInfo, err
-}
-
 func (s *commandState) getFileVersions(filename string) (versionIDs []int, versionNums []int, err error) {
 	fi, err := s.getFileInfoByFilename(filename)
 	if err != nil {

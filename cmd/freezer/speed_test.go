@@ -68,18 +68,12 @@ func doBenchBasicFileSyncUp(testFileSize int, b *testing.B) {
 	randoBytes := genRandomBytes(testFileSize)
 	ioutil.WriteFile(testFilename, randoBytes, os.ModePerm)
 
-	// test adding a file
-	chunkCount, lastMod, permissions, hashString, err := filefreezer.CalcFileHashInfo(cmdState.serverCapabilities.ChunkSize, testFilename)
-	if err != nil {
-		b.Fatalf("Failed to calculate the file hash for %s: %v", testFilename, err)
-	}
-
 	b.ResetTimer()
 
 	// loop: sync a file
 	for n := 0; n < b.N; n++ {
 		destFilename := fmt.Sprintf("bench_data_%08d.dat", n)
-		_, err := cmdState.addFile(testFilename, destFilename, false, permissions, lastMod, chunkCount, hashString)
+		_, _, err := cmdState.syncFile(testFilename, destFilename)
 		if err != nil {
 			b.Fatalf("Failed to at the file %s: %v", testFilename, err)
 		}

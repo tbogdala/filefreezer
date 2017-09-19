@@ -172,17 +172,22 @@ func TestEverything(t *testing.T) {
 
 	// test adding a file
 	filename := testFilename1
-	chunkCount, lastMod, permissions, hashString, err := filefreezer.CalcFileHashInfo(cmdState.serverCapabilities.ChunkSize, filename)
+	chunkCount, _, _, _, err := filefreezer.CalcFileHashInfo(cmdState.serverCapabilities.ChunkSize, filename)
 	if err != nil {
 		t.Fatalf("Failed to calculate the file hash for %s: %v", filename, err)
 	}
 	t.Logf("Calculated hash data for %s ...", filename)
 
-	fileInfo, err := cmdState.addFile(filename, filename, false, permissions, lastMod, chunkCount, hashString)
+	syncStatus, ulCount, err := cmdState.syncFile(filename, filename)
 	if err != nil {
 		t.Fatalf("Failed to at the file %s: %v", filename, err)
 	}
-	t.Logf("Added file %s (id: %d) ...", filename, fileInfo.FileID)
+	if syncStatus != syncStatusLocalNewer {
+		t.Fatalf("Synced local file was not newer: %s", filename)
+	}
+	if ulCount != chunkCount {
+		t.Fatalf("Sync of local file didn't sync the expected number (%d) of chunks: got %d.", chunkCount, ulCount)
+	}
 
 	// at this point we should have a different revision
 	oldRevision = userStats.Revision
@@ -195,7 +200,7 @@ func TestEverything(t *testing.T) {
 	}
 
 	// now that the file is registered, sync the data
-	syncStatus, ulCount, err := cmdState.syncFile(filename, filename)
+	syncStatus, ulCount, err = cmdState.syncFile(filename, filename)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s to the server: %v", filename, err)
 	}
@@ -205,7 +210,6 @@ func TestEverything(t *testing.T) {
 	if ulCount != 0 {
 		t.Fatalf("The first sync of the first test file should be identical, but sync said %d chunks were uploaded.", ulCount)
 	}
-	t.Logf("Synced the file %s ...", filename)
 
 	// at this point we should have the same revision because the file was unchanged
 	oldRevision = userStats.Revision
@@ -218,6 +222,11 @@ func TestEverything(t *testing.T) {
 	}
 
 	// now we get a chunk list for the file
+	fileInfo, err := cmdState.getFileInfoByFilename(filename)
+	if err != nil {
+		t.Fatalf("Failed to get the local file's information from the server: %v", err)
+	}
+
 	var remoteChunks models.FileChunksGetResponse
 	target := fmt.Sprintf("%s/api/chunk/%d/%d", cmdState.hostURI, fileInfo.FileID, fileInfo.CurrentVersion.VersionID)
 	body, err := runAuthRequest(target, "GET", cmdState.authToken, nil)
@@ -632,22 +641,15 @@ func TestFileVersioning(t *testing.T) {
 	rando1 := genRandomBytes(int(*flagServeChunkSize) * 3)
 	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
 
-	// get the local file information
-	filename := testFilename1
-	chunkCount, lastMod, permissions, hashString, err := filefreezer.CalcFileHashInfo(cmdState.serverCapabilities.ChunkSize, filename)
-	if err != nil {
-		t.Fatalf("Failed to calculate the file hash for %s: %v", testFilename1, err)
-	}
-
 	///////////////////////////////////////////////////////////////////////////
 	// upload initial version
 
 	// add the file information to the storage server
-	fileInfo, err := cmdState.addFile(filename, filename, false, permissions, lastMod, chunkCount, hashString)
+	filename := testFilename1
+	_, _, err = cmdState.syncFile(filename, filename)
 	if err != nil {
 		t.Fatalf("Failed to at the file %s: %v", filename, err)
 	}
-	t.Logf("Added file %s (id: %d) ...", filename, fileInfo.FileID)
 
 	// verify we have the file registered
 	allFiles, err = cmdState.getAllFileHashes()
@@ -686,10 +688,6 @@ func TestFileVersioning(t *testing.T) {
 	rando1[2] = 0xBE
 	rando1[3] = 0xEF
 	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
-	chunkCount, lastMod, permissions, hashString, err = filefreezer.CalcFileHashInfo(cmdState.serverCapabilities.ChunkSize, filename)
-	if err != nil {
-		t.Fatalf("Failed to calculate the file hash for %s: %v", testFilename1, err)
-	}
 
 	// upload a newer version of the file
 	status, _, err := cmdState.syncFile(filename, filename)

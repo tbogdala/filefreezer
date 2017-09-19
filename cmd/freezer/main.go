@@ -59,10 +59,6 @@ var (
 	cmdGetFileVersions       = appFlags.Command("versions", "Gets all file versions for a given file in storage.")
 	argGetFileVersionsTarget = cmdGetFileVersions.Arg("target", "The file path to on the server to get version information for.").String()
 
-	cmdAddFile       = appFlags.Command("addfile", "Put a file into storage.")
-	argAddFilePath   = cmdAddFile.Arg("filename", "The local file to put on the server.").Required().String()
-	argAddFileTarget = cmdAddFile.Arg("target", "The file path to use on the server for the local file; defaults to the same as the filename arg.").Default("").String()
-
 	cmdRmFile     = appFlags.Command("rmfile", "Remove a file from storage.")
 	argRmFilePath = cmdRmFile.Arg("filename", "The file to remove on the server.").Required().String()
 
@@ -399,40 +395,6 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to get the file versions for the user %s from the storage server %s: %v", username, host, err)
 		}
-
-	case cmdAddFile.FullCommand():
-		cmdState := newCommandState()
-		username := interactiveGetLoginUser()
-		password := interactiveGetLoginPassword()
-		host := interactiveGetHost()
-
-		err := cmdState.authenticate(host, username, password)
-		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
-		}
-
-		err = initCrypto(cmdState)
-		if err != nil {
-			log.Fatalf("Failed to initialize cryptography: %v", err)
-		}
-
-		filepath := *argAddFilePath
-		remoteTarget := *argAddFileTarget
-		if len(remoteTarget) < 1 {
-			remoteTarget = filepath
-		}
-		chunkCount, lastMod, permissions, hashString, err := filefreezer.CalcFileHashInfo(cmdState.serverCapabilities.ChunkSize, filepath)
-
-		if err != nil {
-			log.Fatalf("Failed to calculate the required data for the file %s: %v", filepath, err)
-		}
-
-		fileInfo, err := cmdState.addFile(filepath, remoteTarget, false, permissions, lastMod, chunkCount, hashString)
-		if err != nil {
-			log.Fatalf("Failed to register the file on the server %s: %v", host, err)
-		}
-
-		logPrintf("File added (FileId: %d | VersionID: %d): %s\n", fileInfo.FileID, fileInfo.CurrentVersion.VersionID, filepath)
 
 	case cmdRmFile.FullCommand():
 		cmdState := newCommandState()
