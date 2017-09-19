@@ -15,8 +15,6 @@ import (
 
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
 
-	"golang.org/x/net/http2"
-
 	"encoding/json"
 	"io/ioutil"
 )
@@ -85,7 +83,7 @@ func getHTTPClient() (*http.Client, error) {
 			Certificates: []tls.Certificate{cert},
 		}
 		//tlsConfig.BuildNameToCertificate()
-		transport := &http2.Transport{TLSClientConfig: tlsConfig}
+		transport := &http.Transport{TLSClientConfig: tlsConfig}
 		client = &http.Client{Transport: transport}
 
 		// Load our trusted certificate path

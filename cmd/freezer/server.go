@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/tbogdala/filefreezer"
-	"golang.org/x/net/http2"
 )
 
 // serverState represents the server state and includes configuration flags.
@@ -111,10 +110,6 @@ func (state *serverState) serve(readyCh chan bool) {
 		err = httpServer.ListenAndServe()
 	} else {
 		logPrintf("Starting https server on %s ...", *argServeListenAddr)
-		err = http2.ConfigureServer(httpServer, nil)
-		if err != nil {
-			logPrintf("Unable to enable HTTP/2 for the server: %v", err)
-		}
 		err = httpServer.ListenAndServeTLS(*flagTLSCrt, *flagTLSKey)
 	}
 	if err != nil && err != http.ErrServerClosed {

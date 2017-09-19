@@ -30,7 +30,6 @@ go get golang.org/x/crypto/scrypt
 go get github.com/dgrijalva/jwt-go
 go get github.com/gorilla/mux
 go get gopkg.in/alecthomas/kingpin.v2
-go get golang.org/x/net/http2
 go get github.com/mattn/go-sqlite3
 go get github.com/spf13/afero
 ```
