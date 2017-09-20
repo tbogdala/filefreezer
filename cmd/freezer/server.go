@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
-	"net/http"
 	"os"
 	"os/signal"
 	"time"
 
+	"github.com/labstack/echo"
 	"github.com/tbogdala/filefreezer"
 )
 
@@ -30,9 +30,9 @@ type serverState struct {
 	// Storage is the filefreezer storage object used to keep data
 	Storage *filefreezer.Storage
 
-	// Authorizor is the interface able to verify username and passwords
-	// as well as sign username and ids into a authentication token.
-	Authorizor
+	// JWTSecretBytes is the slice used to authenticate JWT tokens for this
+	// server instance.
+	JWTSecretBytes []byte
 }
 
 // newState does the setup for the initial state of the server
@@ -55,16 +55,11 @@ func newState() (*serverState, error) {
 		var randoms [32]byte
 		_, err = rand.Read(randoms[:])
 		if err != nil {
-			return nil, fmt.Errorf("A crypto password was not supplied and random generation failed: %v", err)
+			return nil, fmt.Errorf("A crypto passrandomPassphraseword was not supplied and random generation failed: %v", err)
 		}
 		logPrintln("JWT random passphrase generated.")
 	}
-
-	// assign the token generator
-	s.Authorizor, err = NewJWTAuthenticator(s.Storage, randomPassphrase)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to create the JWT token generator: %v", err)
-	}
+	s.JWTSecretBytes = randomPassphrase
 
 	logPrintf("Database opened: %s\n", s.DatabasePath)
 	return s, nil
@@ -76,12 +71,8 @@ func (state *serverState) close() {
 }
 
 func (state *serverState) serve(readyCh chan bool) {
-	// create the HTTP server
-	routes := InitRoutes(state)
-	httpServer := &http.Server{
-		Addr:    *argServeListenAddr,
-		Handler: routes,
-	}
+	e := echo.New()
+	InitRoutes(state, e)
 
 	// attempt to listen to the interrupt signal to signal the stop
 	// chan in a goroutine to call server shutdown.
@@ -90,29 +81,31 @@ func (state *serverState) serve(readyCh chan bool) {
 	signal.Notify(stop, os.Interrupt)
 	go func() {
 		<-stop
-		d := time.Now().Add(5 * time.Second) // deadline 5s max
-		ctx, cancel := context.WithDeadline(context.Background(), d)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		logPrintln("Shutting down server...")
-		if err := httpServer.Shutdown(ctx); err != nil {
+		if err := e.Shutdown(ctx); err != nil {
 			log.Fatalf("could not shutdown: %v", err)
+		}
+	}()
+
+	// create the HTTP server
+	go func() {
+		if len(*flagTLSCrt) < 1 || len(*flagTLSKey) < 1 {
+			logPrintf("Starting http server on %s ...", *argServeListenAddr)
+			if err := e.Start(*argServeListenAddr); err != nil {
+				logPrintln("Shutting down the server ...")
+			}
+		} else {
+			logPrintf("Starting https server on %s ...", *argServeListenAddr)
+			if err := e.StartTLS(*argServeListenAddr, *flagTLSCrt, *flagTLSKey); err != nil {
+				logPrintln("Shutting down the server ...")
+			}
 		}
 	}()
 
 	// now that the listener is up, send out the ready signal
 	if readyCh != nil {
 		readyCh <- true
-	}
-
-	var err error
-	if len(*flagTLSCrt) < 1 || len(*flagTLSKey) < 1 {
-		logPrintf("Starting http server on %s ...", *argServeListenAddr)
-		err = httpServer.ListenAndServe()
-	} else {
-		logPrintf("Starting https server on %s ...", *argServeListenAddr)
-		err = httpServer.ListenAndServeTLS(*flagTLSCrt, *flagTLSKey)
-	}
-	if err != nil && err != http.ErrServerClosed {
-		logPrintf("There was an error while running the HTTP server: %v", err)
 	}
 }

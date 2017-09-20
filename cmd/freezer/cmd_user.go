@@ -135,6 +135,10 @@ func (s *commandState) setCryptoHashForPassword(cryptoPassword string) error {
 	// get the file id for the filename provided
 	target := fmt.Sprintf("%s/api/user/cryptohash", s.hostURI)
 	body, err := runAuthRequest(target, "PUT", s.authToken, putReq)
+	if err != nil {
+		return fmt.Errorf("http request to set the user's cryptohash failed: %v", err)
+	}
+
 	var r models.UserCryptoHashUpdateResponse
 	err = json.Unmarshal(body, &r)
 	if err != nil {

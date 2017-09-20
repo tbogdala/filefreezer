@@ -28,7 +28,7 @@ The following dependencies will need to be installed:
 go get golang.org/x/crypto/bcrypt
 go get golang.org/x/crypto/scrypt
 go get github.com/dgrijalva/jwt-go
-go get github.com/gorilla/mux
+go get github.com/labstack/echo
 go get gopkg.in/alecthomas/kingpin.v2
 go get github.com/mattn/go-sqlite3
 go get github.com/spf13/afero
@@ -112,9 +112,10 @@ TODO / Notes
 
 * work on readability of error messages wrt bubbling up error objects
 
-* condsider bit depth of parameters read in in routes.go (32 vs 64)
+* vendor the dependencies; possibly with go dep
 
-* vendor the dependencies; possibly with govendor
+* set env variable for auth key on login so that subsequent cli requests
+  can use the same auth token which will improve perf on big batch of ops
 
 * ability to purge version history
 
