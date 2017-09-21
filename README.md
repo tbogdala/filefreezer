@@ -34,6 +34,15 @@ go get github.com/mattn/go-sqlite3
 go get github.com/spf13/afero
 ```
 
+This is now managed by Go's [dep](https://github.com/golang/dep) tool. Simply run
+the following command to build the vendor directory for dependencies.
+
+```
+dep ensure
+```
+
+
+
 The self-signed TLS keys for serving HTTP/2 over HTTPS can be created with openssl:
 
 ```bash
