@@ -1,7 +1,7 @@
 // Copyright 2017, Timothy Bogdala <tdb@animal-machine.com>
 // See the LICENSE file for more details.
 
-package main
+package command
 
 import (
 	"encoding/json"
@@ -12,9 +12,9 @@ import (
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
 )
 
-// addUser adds a user to the database using the username, password and quota provided.
+// AddUser adds a user to the database using the username, password and quota provided.
 // The store object will take care of generating the salt and salted password.
-func (s *commandState) addUser(store *filefreezer.Storage, username string, password string, quota int) *filefreezer.User {
+func (s *State) AddUser(store *filefreezer.Storage, username string, password string, quota int) *filefreezer.User {
 	// generate the salt and salted login password hash
 	salt, saltedPass, err := filefreezer.GenLoginPasswordHash(password)
 	if err != nil {
@@ -29,25 +29,25 @@ func (s *commandState) addUser(store *filefreezer.Storage, username string, pass
 		return nil
 	}
 
-	logPrintln("User created successfully")
+	s.Println("User created successfully")
 	return user
 }
 
-// rmUser removes a user from the database using the username as akey.
-func (s *commandState) rmUser(store *filefreezer.Storage, username string) error {
+// RmUser removes a user from the database using the username as akey.
+func (s *State) RmUser(store *filefreezer.Storage, username string) error {
 	// add the user to the database
 	err := store.RemoveUser(username)
 	if err != nil {
 		log.Fatalf("Failed to remove the user %s: %v", username, err)
 	}
 
-	logPrintln("User removed successfully")
+	s.Println("User removed successfully")
 	return nil
 }
 
-// modUser modifies a user in the database. if the newQuota, newUsername or newPassword
+// ModUser modifies a user in the database. if the newQuota, newUsername or newPassword
 // fields are non-nil then their values are updated in the database.
-func (s *commandState) modUser(store *filefreezer.Storage, username string, newQuota int, newUsername string, newPassword string) {
+func (s *State) ModUser(store *filefreezer.Storage, username string, newQuota int, newUsername string, newPassword string) {
 	// get existing user
 	user, err := store.GetUser(username)
 	if err != nil {
@@ -84,13 +84,15 @@ func (s *commandState) modUser(store *filefreezer.Storage, username string, newQ
 		log.Fatalf("Failed to modify the user %s: %v", username, err)
 	}
 
-	logPrintln("User modified successfully")
+	s.Println("User modified successfully")
 }
 
-func (s *commandState) getUserStats() (stats filefreezer.UserStats, e error) {
+// GetUserStats returns a UserStats object for the authenticated user
+// in the command State. A non-nil error value is returned on failure.
+func (s *State) GetUserStats() (stats filefreezer.UserStats, e error) {
 	// get the file id for the filename provided
-	target := fmt.Sprintf("%s/api/user/stats", s.hostURI)
-	body, err := runAuthRequest(target, "GET", s.authToken, nil)
+	target := fmt.Sprintf("%s/api/user/stats", s.HostURI)
+	body, err := s.RunAuthRequest(target, "GET", s.AuthToken, nil)
 	var r models.UserStatsGetResponse
 	err = json.Unmarshal(body, &r)
 	if err != nil {
@@ -98,17 +100,20 @@ func (s *commandState) getUserStats() (stats filefreezer.UserStats, e error) {
 		return
 	}
 
-	logPrintf("Quota:     %v\n", r.Stats.Quota)
-	logPrintf("Allocated: %v\n", r.Stats.Allocated)
-	logPrintf("Revision:  %v\n", r.Stats.Revision)
+	s.Printf("Quota:     %v\n", r.Stats.Quota)
+	s.Printf("Allocated: %v\n", r.Stats.Allocated)
+	s.Printf("Revision:  %v\n", r.Stats.Revision)
 
 	stats = r.Stats
 	return
 }
 
-func (s *commandState) getAllFileHashes() ([]filefreezer.FileInfo, error) {
-	target := fmt.Sprintf("%s/api/files", s.hostURI)
-	body, err := runAuthRequest(target, "GET", s.authToken, nil)
+// GetAllFileHashes returns a slice of FileInfo objects for all files registered
+// to the authenticated user in the command State. A non-nil error value is
+// returned on failure.
+func (s *State) GetAllFileHashes() ([]filefreezer.FileInfo, error) {
+	target := fmt.Sprintf("%s/api/files", s.HostURI)
+	body, err := s.RunAuthRequest(target, "GET", s.AuthToken, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +127,12 @@ func (s *commandState) getAllFileHashes() ([]filefreezer.FileInfo, error) {
 	return allFiles.Files, nil
 }
 
-func (s *commandState) setCryptoHashForPassword(cryptoPassword string) error {
+// SetCryptoHashForPassword sets the hash of the hash of the plaintext password on
+// the server for the authenticated user in the command State. This can then
+// be used to ensure the plaintext password entered by a user is the correct one
+// to decrypt the files without actually storing the crypto key (the hashed plaintext
+// password) on the server. A non-nil error value is returned on failure.
+func (s *State) SetCryptoHashForPassword(cryptoPassword string) error {
 	// first we derive the crypto password bytes that are derived from the password text
 	_, _, combinedHashString, err := filefreezer.GenCryptoPasswordHash(cryptoPassword, true, "")
 	if err != nil {
@@ -133,8 +143,8 @@ func (s *commandState) setCryptoHashForPassword(cryptoPassword string) error {
 	putReq.CryptoHash = []byte(combinedHashString)
 
 	// get the file id for the filename provided
-	target := fmt.Sprintf("%s/api/user/cryptohash", s.hostURI)
-	body, err := runAuthRequest(target, "PUT", s.authToken, putReq)
+	target := fmt.Sprintf("%s/api/user/cryptohash", s.HostURI)
+	body, err := s.RunAuthRequest(target, "PUT", s.AuthToken, putReq)
 	if err != nil {
 		return fmt.Errorf("http request to set the user's cryptohash failed: %v", err)
 	}
@@ -149,7 +159,7 @@ func (s *commandState) setCryptoHashForPassword(cryptoPassword string) error {
 		return fmt.Errorf("an unknown error occurred while updating the cryptography password")
 	}
 
-	s.cryptoHash = putReq.CryptoHash
-	logPrintf("Hash of cryptography password updated successfully.")
+	s.CryptoHash = putReq.CryptoHash
+	s.Printf("Hash of cryptography password updated successfully.")
 	return nil
 }

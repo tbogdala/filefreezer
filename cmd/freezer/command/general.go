@@ -1,7 +1,7 @@
 // Copyright 2017, Timothy Bogdala <tdb@animal-machine.com>
 // See the LICENSE file for more details.
 
-package main
+package command
 
 import (
 	"bytes"
@@ -19,11 +19,11 @@ import (
 	"io/ioutil"
 )
 
-// authenticate will use a HTTP call to authenticate the user
-// and return the JWT token string.
-func (s *commandState) authenticate(hostURI, username, password string) error {
+// Authenticate will use a HTTP call to authenticate the user
+// and set the the JWT authentication token string in the command State object.
+func (s *State) Authenticate(hostURI, username, password string) error {
 	// get the http client to use for the connection
-	client, err := getHTTPClient()
+	client, err := s.getHTTPClient()
 	if err != nil {
 		return err
 	}
@@ -59,20 +59,20 @@ func (s *commandState) authenticate(hostURI, username, password string) error {
 	}
 
 	// authentication was successful so update the command state
-	s.hostURI = hostURI
-	s.authToken = userLogin.Token
-	s.cryptoHash = userLogin.CryptoHash
-	s.serverCapabilities = userLogin.Capabilities
+	s.HostURI = hostURI
+	s.AuthToken = userLogin.Token
+	s.CryptoHash = userLogin.CryptoHash
+	s.ServerCapabilities = userLogin.Capabilities
 
 	return nil
 }
 
 // getHttpClient returns a new http Client object set to work with TLS if keys are provided
 // on the command line or plain http otherwise.
-func getHTTPClient() (*http.Client, error) {
+func (s *State) getHTTPClient() (*http.Client, error) {
 	var client *http.Client
-	if *flagTLSCrt != "" && *flagTLSKey != "" {
-		cert, err := tls.LoadX509KeyPair(*flagTLSCrt, *flagTLSKey)
+	if s.TLSCrt != "" && s.TLSKey != "" {
+		cert, err := tls.LoadX509KeyPair(s.TLSCrt, s.TLSKey)
 		if err != nil {
 			return nil, fmt.Errorf("unable to load cert: %v", err)
 		}
@@ -87,7 +87,7 @@ func getHTTPClient() (*http.Client, error) {
 		client = &http.Client{Transport: transport}
 
 		// Load our trusted certificate path
-		certPath := *flagTLSCrt
+		certPath := s.TLSCrt
 		pemData, err := ioutil.ReadFile(certPath)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to load the certificate file %s: %v", certPath, err)
@@ -104,9 +104,9 @@ func getHTTPClient() (*http.Client, error) {
 }
 
 // buildAuthRequest builds a http client and request with the authorization header and token attached.
-func buildAuthRequest(target string, method string, token string, bodyBytes []byte) (*http.Client, *http.Request, error) {
+func (s *State) buildAuthRequest(target string, method string, token string, bodyBytes []byte) (*http.Client, *http.Request, error) {
 	// Load client cert
-	client, err := getHTTPClient()
+	client, err := s.getHTTPClient()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -121,10 +121,10 @@ func buildAuthRequest(target string, method string, token string, bodyBytes []by
 	return client, req, nil
 }
 
-// runAuthRequest will build the http client and request then get the response and read
+// RunAuthRequest will build the http client and request then get the response and read
 // the body into a byte array. If reqBody is a []byte array, no transformation is done,
 // but if it's another type than it gets marshalled to a text JSON object.
-func runAuthRequest(target string, method string, token string, reqBody interface{}) ([]byte, error) {
+func (s *State) RunAuthRequest(target string, method string, token string, reqBody interface{}) ([]byte, error) {
 	// serialize the reqBody object if one was passed in
 	var err error
 	var reqBodyIsByteSlice bool
@@ -139,7 +139,7 @@ func runAuthRequest(target string, method string, token string, reqBody interfac
 		}
 	}
 
-	client, req, err := buildAuthRequest(target, method, token, reqBytes)
+	client, req, err := s.buildAuthRequest(target, method, token, reqBytes)
 	if err != nil {
 		return nil, err
 	}

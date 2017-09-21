@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tbogdala/filefreezer"
+	"github.com/tbogdala/filefreezer/cmd/freezer/command"
 
 	"strings"
 
@@ -157,12 +158,12 @@ func interactiveGetCryptoPassword() string {
 // the call to the server to set the crypto hash. after the crypto hash is
 // ensured to exist, the crypto key is derived from the crypto password and
 // verified against this hash. an error is returned on failure.
-// note: this should only be run after commandState.authenticate().
-func initCrypto(cmdState *commandState) error {
+// note: this should only be run after command.State.authenticate().
+func initCrypto(cmdState *command.State) error {
 	// if a crypto hash has not been setup already, do so now
-	if len(cmdState.cryptoHash) == 0 {
+	if len(cmdState.CryptoHash) == 0 {
 		newPassword := interactiveFirstTimeSetCryptoPassword()
-		err := cmdState.setCryptoHashForPassword(newPassword)
+		err := cmdState.SetCryptoHashForPassword(newPassword)
 		if err != nil {
 			return err
 		}
@@ -177,12 +178,12 @@ func initCrypto(cmdState *commandState) error {
 	// check the crypto password against the stored hash of the key and keep
 	// the resulting crypto key if the verification was successful.
 	var err error
-	cmdState.cryptoKey, err = filefreezer.VerifyCryptoPassword(*flagCryptoPass, string(cmdState.cryptoHash))
+	cmdState.CryptoKey, err = filefreezer.VerifyCryptoPassword(*flagCryptoPass, string(cmdState.CryptoHash))
 	if err != nil {
 		return err
 	}
 
-	if cmdState.cryptoKey == nil {
+	if cmdState.CryptoKey == nil {
 		return fmt.Errorf("the cryptography password supplied is invalid")
 	}
 
@@ -255,14 +256,22 @@ func main() {
 	parsedFlags := kingpin.MustParse(appFlags.Parse(os.Args[1:]))
 	rand.Seed(time.Now().UnixNano())
 
-	fmtPrintln("Filefreezer Copyright (C) 2017 by Timothy Bogdala <tdb@animal-machine.com>")
-	fmtPrintln("This program comes with ABSOLUTELY NO WARRANTY. This is free software")
-	fmtPrintln("and you are welcome to redistribute it under certain conditions.")
-	fmtPrintln("")
+	cmdState := command.NewState()
+	cmdState.TLSKey = *flagTLSKey
+	cmdState.TLSCrt = *flagTLSCrt
+	cmdState.ExtraStrict = *flagExtraStrict
+	if *flagQuiet {
+		cmdState.SetQuiet(true)
+	}
+
+	cmdState.Println("Filefreezer Copyright (C) 2017 by Timothy Bogdala <tdb@animal-machine.com>")
+	cmdState.Println("This program comes with ABSOLUTELY NO WARRANTY. This is free software")
+	cmdState.Println("and you are welcome to redistribute it under certain conditions.")
+	cmdState.Println("")
 
 	// potentially enable cpu profiling
 	if *flagCPUProfile != "" {
-		fmtPrintf("Enabling CPU Profiling!\n")
+		cmdState.Printf("Enabling CPU Profiling!\n")
 		cpuPprofF, err := os.Create(*flagCPUProfile)
 		if err != nil {
 			log.Fatal(err)
@@ -290,31 +299,27 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to open the storage database: %v", err)
 		}
-		cmdState := newCommandState()
 		username := interactiveGetLoginUser()
 		password := interactiveGetLoginPassword()
-		cmdState.addUser(store, username, password, *flagAddUserQuota)
+		cmdState.AddUser(store, username, password, *flagAddUserQuota)
 
 	case cmdRmUser.FullCommand():
 		store, err := openStorage()
 		if err != nil {
 			log.Fatalf("Failed to open the storage database: %v", err)
 		}
-		cmdState := newCommandState()
 		username := interactiveGetLoginUser()
-		cmdState.rmUser(store, username)
+		cmdState.RmUser(store, username)
 
 	case cmdModUser.FullCommand():
 		store, err := openStorage()
 		if err != nil {
 			log.Fatalf("Failed to open the storage database: %v", err)
 		}
-		cmdState := newCommandState()
 		username := interactiveGetLoginUser()
-		cmdState.modUser(store, username, *flagModUserNewQuota, *flagModUserNewName, *flagModUserNewPass)
+		cmdState.ModUser(store, username, *flagModUserNewQuota, *flagModUserNewName, *flagModUserNewPass)
 
 	case cmdCryptoSetPass.FullCommand():
-		cmdState := newCommandState()
 		username := interactiveGetLoginUser()
 		password := interactiveGetLoginPassword()
 		host := interactiveGetHost()
@@ -323,20 +328,19 @@ func main() {
 			*flagCryptoSetPassPW = interactiveGetCryptoPassword()
 		}
 
-		err := cmdState.authenticate(host, username, password)
+		err := cmdState.Authenticate(host, username, password)
 		if err != nil {
 			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
 		}
 
-		cmdState.setCryptoHashForPassword(*flagCryptoSetPassPW)
+		cmdState.SetCryptoHashForPassword(*flagCryptoSetPassPW)
 
 	case cmdGetFiles.FullCommand():
-		cmdState := newCommandState()
 		username := interactiveGetLoginUser()
 		password := interactiveGetLoginPassword()
 		host := interactiveGetHost()
 
-		err := cmdState.authenticate(host, username, password)
+		err := cmdState.Authenticate(host, username, password)
 		if err != nil {
 			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
 		}
@@ -346,7 +350,7 @@ func main() {
 			log.Fatalf("Failed to initialize cryptography: %v", err)
 		}
 
-		allFiles, err := cmdState.getAllFileHashes()
+		allFiles, err := cmdState.GetAllFileHashes()
 		if err != nil {
 			log.Fatalf("Failed to get all of the files for the user %s from the storage server %s: %v", username, host, err)
 		}
@@ -366,7 +370,7 @@ func main() {
 				builder.WriteString("F        | ")
 			}
 
-			decryptedFilename, err := cmdState.decryptString(fi.FileName)
+			decryptedFilename, err := cmdState.DecryptString(fi.FileName)
 			if err != nil {
 				logPrintf("Failed to decrypt filename for file id %d: %v", fi.FileID, err)
 			}
@@ -376,12 +380,11 @@ func main() {
 		}
 
 	case cmdGetFileVersions.FullCommand():
-		cmdState := newCommandState()
 		username := interactiveGetLoginUser()
 		password := interactiveGetLoginPassword()
 		host := interactiveGetHost()
 
-		err := cmdState.authenticate(host, username, password)
+		err := cmdState.Authenticate(host, username, password)
 		if err != nil {
 			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
 		}
@@ -391,18 +394,17 @@ func main() {
 			log.Fatalf("Failed to initialize cryptography: %v", err)
 		}
 
-		_, _, err = cmdState.getFileVersions(*argGetFileVersionsTarget)
+		_, _, err = cmdState.GetFileVersions(*argGetFileVersionsTarget)
 		if err != nil {
 			log.Fatalf("Failed to get the file versions for the user %s from the storage server %s: %v", username, host, err)
 		}
 
 	case cmdRmFile.FullCommand():
-		cmdState := newCommandState()
 		username := interactiveGetLoginUser()
 		password := interactiveGetLoginPassword()
 		host := interactiveGetHost()
 
-		err := cmdState.authenticate(host, username, password)
+		err := cmdState.Authenticate(host, username, password)
 		if err != nil {
 			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
 		}
@@ -413,18 +415,17 @@ func main() {
 		}
 
 		filepath := *argRmFilePath
-		err = cmdState.rmFile(filepath)
+		err = cmdState.RmFile(filepath)
 		if err != nil {
 			log.Fatalf("Failed to remove file from the server %s: %v", host, err)
 		}
 
 	case cmdSync.FullCommand():
-		cmdState := newCommandState()
 		username := interactiveGetLoginUser()
 		password := interactiveGetLoginPassword()
 		host := interactiveGetHost()
 
-		err := cmdState.authenticate(host, username, password)
+		err := cmdState.Authenticate(host, username, password)
 		if err != nil {
 			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
 		}
@@ -439,18 +440,17 @@ func main() {
 		if len(remoteFilepath) < 1 {
 			remoteFilepath = filepath
 		}
-		_, _, err = cmdState.syncFile(filepath, remoteFilepath)
+		_, _, err = cmdState.SyncFile(filepath, remoteFilepath)
 		if err != nil {
 			log.Fatalf("Failed to synchronize the path %s: %v", filepath, err)
 		}
 
 	case cmdSyncDir.FullCommand():
-		cmdState := newCommandState()
 		username := interactiveGetLoginUser()
 		password := interactiveGetLoginPassword()
 		host := interactiveGetHost()
 
-		err := cmdState.authenticate(host, username, password)
+		err := cmdState.Authenticate(host, username, password)
 		if err != nil {
 			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
 		}
@@ -465,23 +465,22 @@ func main() {
 		if len(remoteFilepath) < 1 {
 			remoteFilepath = filepath
 		}
-		_, err = cmdState.syncDirectory(filepath, remoteFilepath)
+		_, err = cmdState.SyncDirectory(filepath, remoteFilepath)
 		if err != nil {
 			log.Fatalf("Failed to synchronize the directory %s: %v", filepath, err)
 		}
 
 	case cmdUserStats.FullCommand():
-		cmdState := newCommandState()
 		username := interactiveGetLoginUser()
 		password := interactiveGetLoginPassword()
 		host := interactiveGetHost()
 
-		err := cmdState.authenticate(host, username, password)
+		err := cmdState.Authenticate(host, username, password)
 		if err != nil {
 			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
 		}
 
-		_, err = cmdState.getUserStats()
+		_, err = cmdState.GetUserStats()
 		if err != nil {
 			log.Fatalf("Failed to get the user stats from the server %s: %v", host, err)
 		}

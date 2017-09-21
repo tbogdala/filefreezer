@@ -1,7 +1,7 @@
 // Copyright 2017, Timothy Bogdala <tdb@animal-machine.com>
 // See the LICENSE file for more details.
 
-package main
+package command
 
 import (
 	"crypto/aes"
@@ -18,7 +18,7 @@ const (
 
 // encryptString will encrypt the source string bytes and then return
 // a base64 encoded string version of the crypto bytes
-func (s *commandState) encryptString(source string) (string, error) {
+func (s *State) EncryptString(source string) (string, error) {
 	cryptoBytes, err := s.encryptBytes([]byte(source))
 	if err != nil {
 		return "", err
@@ -30,7 +30,7 @@ func (s *commandState) encryptString(source string) (string, error) {
 
 // decryptString will decrypt the source base64 encoded string into
 // crypto bytes and then return the result as a string.
-func (s *commandState) decryptString(encoded string) (string, error) {
+func (s *State) DecryptString(encoded string) (string, error) {
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return "", err
@@ -43,9 +43,9 @@ func (s *commandState) decryptString(encoded string) (string, error) {
 	return string(decrypted), nil
 }
 
-func (s *commandState) encryptBytes(b []byte) ([]byte, error) {
+func (s *State) encryptBytes(b []byte) ([]byte, error) {
 	// encrypt the original bytes
-	aesCipher, err := aes.NewCipher(s.cryptoKey)
+	aesCipher, err := aes.NewCipher(s.CryptoKey)
 	if err != nil {
 		return nil, fmt.Errorf("Couldn't initialize the AES cipher. " + err.Error())
 	}
@@ -66,9 +66,9 @@ func (s *commandState) encryptBytes(b []byte) ([]byte, error) {
 	return cipherBytes, nil
 }
 
-func (s *commandState) decryptBytes(b []byte) ([]byte, error) {
+func (s *State) decryptBytes(b []byte) ([]byte, error) {
 	// encrypt the original bytes
-	aesCipher, err := aes.NewCipher(s.cryptoKey)
+	aesCipher, err := aes.NewCipher(s.CryptoKey)
 	if err != nil {
 		return nil, fmt.Errorf("Couldn't initialize the AES cipher. " + err.Error())
 	}
