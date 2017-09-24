@@ -29,6 +29,7 @@ const (
 	testServerAddr = ":8080"
 	testDataDir    = "testdata"
 	testDataDir2   = "testdata/subdir"
+	testDataDir3   = "testdata/empty"
 	testFilename1  = "testdata/unit_test_1.dat"
 	testFilename2  = "testdata/unit_test_2.dat"
 	testFilename3  = "testdata/subdir/unit_test_3.dat"
@@ -592,6 +593,55 @@ func TestEverything(t *testing.T) {
 		t.Fatalf("The sync of the empty test file should have downloaded zero chunks but it downloaded %d.", dlCount)
 	}
 
+	// create an empty directory and attempt to sync it
+	err = os.MkdirAll(testDataDir3, os.ModeDir)
+	if err != nil {
+		t.Fatalf("Failed to create the empty test directory: %v", err)
+	}
+	syncStatus, dlCount, err = cmdState.SyncFile(testDataDir3, testDataDir3)
+	if err != nil {
+		t.Fatalf("Failed to sync the empty directory %s to the server: %v", testDataDir3, err)
+	}
+	if syncStatus != command.SyncStatusLocalNewer {
+		t.Fatalf("Empty dir sync should be not newer for dir %s (%d)", testFilename4, syncStatus)
+	}
+	if ulCount != 0 {
+		t.Fatalf("The sync of the empty dir file should have downloaded zero chunks but it downloaded %d.", dlCount)
+	}
+
+	// syncing again should return the Same status
+	syncStatus, dlCount, err = cmdState.SyncFile(testDataDir3, testDataDir3)
+	if err != nil {
+		t.Fatalf("Failed to sync the empty directory %s from the server: %v", testDataDir3, err)
+	}
+	if syncStatus != command.SyncStatusSame {
+		t.Fatalf("Empty dir should be the same on a repeat sync for dir %s (%d)", testFilename4, syncStatus)
+	}
+	if ulCount != 0 {
+		t.Fatalf("The sync of the empty test dir should have downloaded zero chunks but it downloaded %d.", dlCount)
+	}
+
+	// deleting the directory and syncing again should pull it back from the server
+	err = os.Remove(testDataDir3)
+	if err != nil {
+		t.Fatalf("Failed to delete the empty directory %s: %v", testDataDir3, err)
+	}
+
+	// syncing again should recreate the directory
+	syncStatus, dlCount, err = cmdState.SyncFile(testDataDir3, testDataDir3)
+	if err != nil {
+		t.Fatalf("Failed to sync the empty directory %s from the server: %v", testDataDir3, err)
+	}
+	if syncStatus != command.SyncStatusRemoteNewer {
+		t.Fatalf("Empty dir should be newer on a repeat sync for dir %s after deleting the directory (%d)", testFilename4, syncStatus)
+	}
+	if ulCount != 0 {
+		t.Fatalf("The sync of the empty test dir should have downloaded zero chunks but it downloaded %d.", dlCount)
+	}
+
+	if _, err := os.Stat(testDataDir3); os.IsNotExist(err) {
+		t.Fatalf("Empty directory should have been synced from the server but it was not created on the filesystem.")
+	}
 }
 
 func TestFileVersioning(t *testing.T) {
