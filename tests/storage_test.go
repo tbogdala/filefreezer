@@ -101,13 +101,14 @@ func TestQuotasAndPermissions(t *testing.T) {
 	}
 
 	filename := "../storage.go"
-	chunkCount, lastMod, permissions, hashString, err := filefreezer.CalcFileHashInfo(store.ChunkSize, filename)
+	fileStats, err := filefreezer.CalcFileHashInfo(store.ChunkSize, filename)
 	if err != nil {
 		t.Fatalf("Failed to calculate the file hash data (%s): %v", filename, err)
 	}
 
 	// add the file information to the storage server
-	fi, err := store.AddFileInfo(user.ID, filename, false, permissions, lastMod, chunkCount, hashString)
+	fi, err := store.AddFileInfo(user.ID, filename, fileStats.IsDir, fileStats.Permissions,
+		fileStats.LastMod, fileStats.ChunkCount, fileStats.HashString)
 	if err != nil {
 		t.Fatalf("Failed to add a new file (%s): %v", filename, err)
 	}
@@ -237,13 +238,14 @@ func TestBasicDBCreation(t *testing.T) {
 
 	// pull up the local file information
 	filename := "../README.md"
-	chunkCount, lastMod, permissions, hashString, err := filefreezer.CalcFileHashInfo(store.ChunkSize, filename)
+	fileStats, err := filefreezer.CalcFileHashInfo(store.ChunkSize, filename)
 	if err != nil {
 		t.Fatalf("Failed to calculate the file hash for %s: %v", filename, err)
 	}
 
 	// add the file information to the storage server
-	fi, err := store.AddFileInfo(user.ID, filename, false, permissions, lastMod, chunkCount, hashString)
+	fi, err := store.AddFileInfo(user.ID, filename, fileStats.IsDir, fileStats.Permissions,
+		fileStats.LastMod, fileStats.ChunkCount, fileStats.HashString)
 	if err != nil {
 		t.Fatalf("Failed to add a new file (%s): %v", filename, err)
 	}
@@ -268,7 +270,8 @@ func TestBasicDBCreation(t *testing.T) {
 	}
 
 	// add the file information to the storage server again for the rest of the tests
-	_, err = store.AddFileInfo(user.ID, filename, false, permissions, lastMod, chunkCount, hashString)
+	_, err = store.AddFileInfo(user.ID, filename, fileStats.IsDir, fileStats.Permissions,
+		fileStats.LastMod, fileStats.ChunkCount, fileStats.HashString)
 	if err != nil {
 		t.Fatalf("Failed to add a new file (%s): %v", filename, err)
 	}
@@ -285,9 +288,11 @@ func TestBasicDBCreation(t *testing.T) {
 	var first, second *filefreezer.FileInfo
 	first = &fileInfos[0]
 	if first.UserID != user.ID || first.FileID != 1 || first.FileName != filename ||
-		first.CurrentVersion.ChunkCount != chunkCount || first.CurrentVersion.LastMod != lastMod ||
-		first.CurrentVersion.FileHash != hashString || first.IsDir != false ||
-		first.CurrentVersion.Permissions != permissions {
+		first.CurrentVersion.ChunkCount != fileStats.ChunkCount ||
+		first.CurrentVersion.LastMod != fileStats.LastMod ||
+		first.CurrentVersion.FileHash != fileStats.HashString ||
+		first.IsDir != fileStats.IsDir ||
+		first.CurrentVersion.Permissions != fileStats.Permissions {
 		t.Fatalf("The file information returned %s was incorrect: %v", filename, first)
 	}
 
@@ -315,19 +320,21 @@ func TestBasicDBCreation(t *testing.T) {
 
 	// add a second file
 	filename = "../storage.go"
-	chunkCount, lastMod, permissions, hashString, err = filefreezer.CalcFileHashInfo(store.ChunkSize, filename)
+	fileStats, err = filefreezer.CalcFileHashInfo(store.ChunkSize, filename)
 	if err != nil {
 		t.Fatalf("Failed to calculate the file hash for %s: %v", filename, err)
 	}
 
 	// add the file information to the storage server
-	_, err = store.AddFileInfo(user.ID, filename, false, permissions, lastMod, chunkCount, hashString)
+	_, err = store.AddFileInfo(user.ID, filename, fileStats.IsDir, fileStats.Permissions,
+		fileStats.LastMod, fileStats.ChunkCount, fileStats.HashString)
 	if err != nil {
 		t.Fatalf("Failed to add a new file (%s): %v", filename, err)
 	}
 
 	// attempt to add the same file information again, which should fail as a duplicate
-	_, err = store.AddFileInfo(user.ID, filename, false, permissions, lastMod, chunkCount, hashString)
+	_, err = store.AddFileInfo(user.ID, filename, fileStats.IsDir, fileStats.Permissions,
+		fileStats.LastMod, fileStats.ChunkCount, fileStats.HashString)
 	if err == nil {
 		t.Fatal("Added a duplicate filename under the same user successuflly when a failure was expected.")
 	}
@@ -347,8 +354,9 @@ func TestBasicDBCreation(t *testing.T) {
 		second = &fileInfos[0]
 	}
 	if second.FileName != filename || second.FileID != 2 || second.UserID != user.ID ||
-		second.CurrentVersion.LastMod != lastMod || second.CurrentVersion.FileHash != hashString ||
-		second.CurrentVersion.ChunkCount != chunkCount {
+		second.CurrentVersion.LastMod != fileStats.LastMod ||
+		second.CurrentVersion.FileHash != fileStats.HashString ||
+		second.CurrentVersion.ChunkCount != fileStats.ChunkCount {
 		t.Fatalf("Failed to get the added file (%s) using GetAllUserFileInfos().", filename)
 	}
 
@@ -599,7 +607,7 @@ func TestFileVersioning(t *testing.T) {
 	defer os.Remove(testFilename1)
 
 	// get the local file information
-	chunkCount, lastMod, permissions, hashString, err := filefreezer.CalcFileHashInfo(store.ChunkSize, testFilename1)
+	fileStats, err := filefreezer.CalcFileHashInfo(store.ChunkSize, testFilename1)
 	if err != nil {
 		t.Fatalf("Failed to calculate the file hash for %s: %v", testFilename1, err)
 	}
@@ -608,7 +616,8 @@ func TestFileVersioning(t *testing.T) {
 	// upload initial version
 
 	// add the file information to the storage server
-	fi, err := store.AddFileInfo(user.ID, testFilename1, false, permissions, lastMod, chunkCount, hashString)
+	fi, err := store.AddFileInfo(user.ID, testFilename1, fileStats.IsDir, fileStats.Permissions,
+		fileStats.LastMod, fileStats.ChunkCount, fileStats.HashString)
 	if err != nil {
 		t.Fatalf("Failed to add a new file (%s): %v", testFilename1, err)
 	}
@@ -663,13 +672,14 @@ func TestFileVersioning(t *testing.T) {
 	rando1[2] = 0xBE
 	rando1[3] = 0xEF
 	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
-	chunkCount, lastMod, permissions, hashString, err = filefreezer.CalcFileHashInfo(store.ChunkSize, testFilename1)
+	fileStats, err = filefreezer.CalcFileHashInfo(store.ChunkSize, testFilename1)
 	if err != nil {
 		t.Fatalf("Failed to calculate the file hash for %s: %v", testFilename1, err)
 	}
 
 	// register a new version of the file in storage with the updated local information
-	fiV2, err := store.TagNewFileVersion(user.ID, fi.FileID, permissions, lastMod, chunkCount, hashString)
+	fiV2, err := store.TagNewFileVersion(user.ID, fi.FileID, fileStats.Permissions,
+		fileStats.LastMod, fileStats.ChunkCount, fileStats.HashString)
 	if err != nil {
 		t.Fatalf("Failed to tag a new file version for %s: %v", testFilename1, err)
 	}
@@ -721,13 +731,14 @@ func TestFileVersioning(t *testing.T) {
 	// modify all existing chunks and upload a new version
 	rando1 = genRandomBytes(int(store.ChunkSize) * 3)
 	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
-	chunkCount, lastMod, permissions, hashString, err = filefreezer.CalcFileHashInfo(store.ChunkSize, testFilename1)
+	fileStats, err = filefreezer.CalcFileHashInfo(store.ChunkSize, testFilename1)
 	if err != nil {
 		t.Fatalf("Failed to calculate the file hash for %s: %v", testFilename1, err)
 	}
 
 	// register a new version of the file in storage with the updated local information
-	fiV3, err := store.TagNewFileVersion(user.ID, fiV2.FileID, permissions, lastMod, chunkCount, hashString)
+	fiV3, err := store.TagNewFileVersion(user.ID, fiV2.FileID, fileStats.Permissions,
+		fileStats.LastMod, fileStats.ChunkCount, fileStats.HashString)
 	if err != nil {
 		t.Fatalf("Failed to tag a new file version for %s: %v", testFilename1, err)
 	}
@@ -779,13 +790,14 @@ func TestFileVersioning(t *testing.T) {
 	// make a larger file and upload a new version
 	rando1 = genRandomBytes(int(store.ChunkSize) * 6)
 	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
-	chunkCount, lastMod, permissions, hashString, err = filefreezer.CalcFileHashInfo(store.ChunkSize, testFilename1)
+	fileStats, err = filefreezer.CalcFileHashInfo(store.ChunkSize, testFilename1)
 	if err != nil {
 		t.Fatalf("Failed to calculate the file hash for %s: %v", testFilename1, err)
 	}
 
 	// register a new version of the file in storage with the updated local information
-	fiV4, err := store.TagNewFileVersion(user.ID, fiV3.FileID, permissions, lastMod, chunkCount, hashString)
+	fiV4, err := store.TagNewFileVersion(user.ID, fiV3.FileID, fileStats.Permissions,
+		fileStats.LastMod, fileStats.ChunkCount, fileStats.HashString)
 	if err != nil {
 		t.Fatalf("Failed to tag a new file version for %s: %v", testFilename1, err)
 	}
@@ -837,13 +849,14 @@ func TestFileVersioning(t *testing.T) {
 	// make the file smaller and upload a new version
 	rando1 = rando1[:(int(store.ChunkSize)*2)-1]
 	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
-	chunkCount, lastMod, permissions, hashString, err = filefreezer.CalcFileHashInfo(store.ChunkSize, testFilename1)
+	fileStats, err = filefreezer.CalcFileHashInfo(store.ChunkSize, testFilename1)
 	if err != nil {
 		t.Fatalf("Failed to calculate the file hash for %s: %v", testFilename1, err)
 	}
 
 	// register a new version of the file in storage with the updated local information
-	fiV5, err := store.TagNewFileVersion(user.ID, fiV4.FileID, permissions, lastMod, chunkCount, hashString)
+	fiV5, err := store.TagNewFileVersion(user.ID, fiV4.FileID, fileStats.Permissions,
+		fileStats.LastMod, fileStats.ChunkCount, fileStats.HashString)
 	if err != nil {
 		t.Fatalf("Failed to tag a new file version for %s: %v", testFilename1, err)
 	}

@@ -62,14 +62,13 @@ func (s *State) SyncDirectory(localDir string, remoteDir string) (changeCount in
 			remoteFileName := remoteDir + "/" + localFileInfo.Name()
 
 			// process directories by recursively looking into them for local files
-			// and other directories.
+			// and other directories; after that, add the directory itself
 			if localFileInfo.IsDir() {
 				changes, err := processDir(localFileName, remoteFileName)
 				if err != nil {
 					return changes, err
 				}
 				changeCount += changes
-				continue
 			}
 
 			// attempt the local file sync operation
@@ -149,11 +148,12 @@ func (s *State) SyncFile(localFilename string, remoteFilepath string) (status in
 	// if the file is not registered with the storage server, then upload it ...
 	// futher checking will be unnecessary.
 	if err != nil {
-		localChunkCount, localLastMod, localPerms, localHash, err := filefreezer.CalcFileHashInfo(s.ServerCapabilities.ChunkSize, localFilename)
+		localStats, err := filefreezer.CalcFileHashInfo(s.ServerCapabilities.ChunkSize, localFilename)
 		if err != nil {
 			return SyncStatusMissing, 0, fmt.Errorf("Failed to calculate the file hash data for file %s to upload as %s: %v", localFilename, remoteFilepath, err)
 		}
-		ulCount, err := s.syncUploadNew(localFilename, remoteFilepath, false, localPerms, localLastMod, localChunkCount, localHash)
+		ulCount, err := s.syncUploadNew(localFilename, remoteFilepath, localStats.IsDir,
+			localStats.Permissions, localStats.LastMod, localStats.ChunkCount, localStats.HashString)
 		if err != nil {
 			return SyncStatusMissing, ulCount, fmt.Errorf("Failed to upload the file to the server %s: %v", s.HostURI, err)
 		}
@@ -163,30 +163,52 @@ func (s *State) SyncFile(localFilename string, remoteFilepath string) (status in
 	// we got a valid response so the file is registered on the server;
 	// continue checking...
 
-	// if the local file doesn't exist then download the file from the server if
-	// it is registered there.
 	if _, err := os.Stat(localFilename); os.IsNotExist(err) {
-		dlCount, err := s.syncDownload(remote.FileID, remote.CurrentVersion.VersionID, localFilename,
-			remoteFilepath, remote.CurrentVersion.ChunkCount)
-		return SyncStatusRemoteNewer, dlCount, err
+		// if it is a local file that doesn't exist then download the file from the
+		// server if it is registered there.
+		if !remote.IsDir {
+			dlCount, err := s.syncDownload(remote.FileID, remote.CurrentVersion.VersionID, localFilename,
+				remoteFilepath, remote.CurrentVersion.ChunkCount)
+			return SyncStatusRemoteNewer, dlCount, err
+		}
+
+		// if its a local directory that doesn't exist, then just create the directory
+		err = os.MkdirAll(localFilename, os.ModeDir|os.FileMode(remote.CurrentVersion.Permissions))
+		if err != nil {
+			return SyncStatusRemoteNewer, 0, err
+		}
+
+		s.Printf("%s <== directory created", remoteFilepath)
+		return SyncStatusRemoteNewer, 0, nil
 	}
 
 	// calculate some of the local file information
-	localChunkCount, localLastMod, localPermissions, localHash, err := filefreezer.CalcFileHashInfo(s.ServerCapabilities.ChunkSize, localFilename)
+	localStats, err := filefreezer.CalcFileHashInfo(s.ServerCapabilities.ChunkSize, localFilename)
 	if err != nil {
 		return 0, 0, fmt.Errorf("Failed to calculate the local file hash data for %s: %v", localFilename, err)
+	}
+
+	// if this is a directory we're syncing, the above scenarios cover registering
+	// it with the server and creating it locally.
+	// NOTE: at this point, lastmod and permissions are not synced between
+	// remote and local filesystems because there's no way to determine
+	// which is authoritative.
+	if localStats.IsDir {
+		return SyncStatusSame, 0, nil
 	}
 
 	// pull the list of missing chunks for the file
 	remoteMissingChunks, err := s.GetMissingChunksForFile(remote.FileID)
 	if err != nil {
-		return 0, 0, err
+		return SyncStatusSame, 0, err
 	}
 
 	// lets prove that we don't need to do anything for some cases
 	// NOTE: a lastMod difference here doesn't trigger a difference if other metrics check out the same
 	// NOTE: a difference in permissions also doesn't trigger a difference
-	if localHash == remote.CurrentVersion.FileHash && len(remoteMissingChunks) == 0 && localChunkCount == remote.CurrentVersion.ChunkCount {
+	if localStats.HashString == remote.CurrentVersion.FileHash &&
+		len(remoteMissingChunks) == 0 &&
+		localStats.ChunkCount == remote.CurrentVersion.ChunkCount {
 		different := false
 		if s.ExtraStrict {
 			// now we get a chunk list for the file
@@ -200,9 +222,9 @@ func (s *State) SyncFile(localFilename string, remoteFilepath string) (status in
 
 			// sanity check
 			remoteChunkCount := len(remoteChunks.Chunks)
-			if localChunkCount == remoteChunkCount {
+			if localStats.ChunkCount == remoteChunkCount {
 				// check the local chunks against remote hashes
-				err = forEachChunk(int(s.ServerCapabilities.ChunkSize), localFilename, localChunkCount, func(i int, b []byte) (bool, error) {
+				err = forEachChunk(int(s.ServerCapabilities.ChunkSize), localFilename, localStats.ChunkCount, func(i int, b []byte) (bool, error) {
 					// hash the chunk
 					hasher := sha1.New()
 					hasher.Write(b)
@@ -233,12 +255,13 @@ func (s *State) SyncFile(localFilename string, remoteFilepath string) (status in
 
 	// at this point we have a file difference. we'll use the local file as the source of truth
 	// if it's lastMod is newer than the remote file.
-	if localLastMod > remote.CurrentVersion.LastMod {
-		ulCount, e := s.syncUploadNewer(remote.FileID, localFilename, remoteFilepath, false, localPermissions, localLastMod, localChunkCount, localHash)
+	if localStats.LastMod > remote.CurrentVersion.LastMod {
+		ulCount, e := s.syncUploadNewer(remote.FileID, localFilename, remoteFilepath, localStats.IsDir,
+			localStats.Permissions, localStats.LastMod, localStats.ChunkCount, localStats.HashString)
 		return SyncStatusLocalNewer, ulCount, e
 	}
 
-	if localLastMod < remote.CurrentVersion.LastMod {
+	if localStats.LastMod < remote.CurrentVersion.LastMod {
 		dlCount, e := s.syncDownload(remote.FileID, remote.CurrentVersion.VersionID, localFilename,
 			remoteFilepath, remote.CurrentVersion.ChunkCount)
 		return SyncStatusRemoteNewer, dlCount, e
@@ -247,14 +270,16 @@ func (s *State) SyncFile(localFilename string, remoteFilepath string) (status in
 	// there's been a difference detected in the files, but the mod times were the same, so
 	// we attempt to upload any missing chunks.
 	if len(remoteMissingChunks) > 0 {
-		ulCount, e := s.syncUploadMissing(remote.FileID, remote.CurrentVersion.VersionID, localFilename, remoteFilepath, localChunkCount)
+		ulCount, e := s.syncUploadMissing(remote.FileID, remote.CurrentVersion.VersionID, localFilename, remoteFilepath, localStats.ChunkCount)
 		return SyncStatusMissing, ulCount, e
 	}
 
 	// if we've got this far, we have a local and remote file with the same lastmod
 	// but differing hashes. for this case we'll upload the local file as a newer version.
-	if localHash != remote.CurrentVersion.FileHash && localLastMod == remote.CurrentVersion.LastMod {
-		ulCount, e := s.syncUploadNewer(remote.FileID, localFilename, remoteFilepath, false, localPermissions, localLastMod, localChunkCount, localHash)
+	if localStats.HashString != remote.CurrentVersion.FileHash &&
+		localStats.LastMod == remote.CurrentVersion.LastMod {
+		ulCount, e := s.syncUploadNewer(remote.FileID, localFilename, remoteFilepath, localStats.IsDir,
+			localStats.Permissions, localStats.LastMod, localStats.ChunkCount, localStats.HashString)
 		return SyncStatusLocalNewer, ulCount, e
 	}
 
@@ -263,8 +288,8 @@ func (s *State) SyncFile(localFilename string, remoteFilepath string) (status in
 	return 0, 0, fmt.Errorf("found differences between local (%s) and remote (%s) versions, "+
 		"but this was not reconcilled; lastmod equality (%v); hash equality (%v)",
 		localFilename, remoteFilepath,
-		localLastMod == remote.CurrentVersion.LastMod,
-		localHash == remote.CurrentVersion.FileHash)
+		localStats.LastMod == remote.CurrentVersion.LastMod,
+		localStats.HashString == remote.CurrentVersion.FileHash)
 }
 
 func (s *State) syncUploadMissing(remoteID int, remoteVersionID int, filename string, remoteFilepath string, localChunkCount int) (uploadCount int, e error) {
@@ -322,6 +347,12 @@ func (s *State) syncUploadNewer(remoteFileID int, filename string, remoteFilepat
 	err = json.Unmarshal(body, &postResp)
 	if err != nil {
 		return 0, fmt.Errorf("Failed to read the response for tagging a new version for the file %d: %v", remoteFileID, err)
+	}
+
+	// if we're uploading a newer version for a directory we can just
+	// stop here because there are no chunks to send.
+	if isDir {
+		return
 	}
 
 	fi := &postResp.FileInfo
@@ -389,6 +420,13 @@ func (s *State) syncUploadNew(filename string, remoteFilepath string, isDir bool
 	err = json.Unmarshal(body, &putResp)
 	if err != nil {
 		return 0, err
+	}
+
+	// if we're uploading a new directory, stop here because there are no
+	// chunks to sync.
+	if isDir == true {
+		s.Printf("%s ==> directory created", remoteFilepath)
+		return 0, nil
 	}
 
 	var getFileInfoResp models.FileGetResponse

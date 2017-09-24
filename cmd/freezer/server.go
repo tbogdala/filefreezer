@@ -70,7 +70,7 @@ func (state *serverState) close() {
 	state.Storage.Close()
 }
 
-func (state *serverState) serve(readyCh chan bool) {
+func (state *serverState) serve(readyCh chan bool) (quitCh chan bool) {
 	e := echo.New()
 	InitRoutes(state, e)
 
@@ -78,6 +78,7 @@ func (state *serverState) serve(readyCh chan bool) {
 	// chan in a goroutine to call server shutdown.
 	// NOTE: doesn't appear to work on windows
 	stop := make(chan os.Signal)
+	quitCh = make(chan bool)
 	signal.Notify(stop, os.Interrupt)
 	go func() {
 		<-stop
@@ -87,6 +88,9 @@ func (state *serverState) serve(readyCh chan bool) {
 		if err := e.Shutdown(ctx); err != nil {
 			log.Fatalf("could not shutdown: %v", err)
 		}
+
+		// pass the message on the quit channel that the server was stopped
+		quitCh <- true
 	}()
 
 	// create the HTTP server
@@ -108,4 +112,6 @@ func (state *serverState) serve(readyCh chan bool) {
 	if readyCh != nil {
 		readyCh <- true
 	}
+
+	return quitCh
 }

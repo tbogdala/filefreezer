@@ -95,7 +95,7 @@ func doBenchBasicFileSyncDown(testFileSize int, b *testing.B) {
 	ioutil.WriteFile(testFilename, randoBytes, os.ModePerm)
 
 	// test adding a file
-	chunkCount, _, _, _, err := filefreezer.CalcFileHashInfo(cmdState.ServerCapabilities.ChunkSize, testFilename)
+	fileStats, err := filefreezer.CalcFileHashInfo(cmdState.ServerCapabilities.ChunkSize, testFilename)
 	if err != nil {
 		b.Fatalf("Failed to calculate the file hash for %s: %v", testFilename, err)
 	}
@@ -125,8 +125,8 @@ func doBenchBasicFileSyncDown(testFileSize int, b *testing.B) {
 		if status != command.SyncStatusRemoteNewer {
 			b.Fatal("Benchmark sync should find the remote file newer.")
 		}
-		if changeCount != chunkCount {
-			b.Fatalf("The sync of the test file should be identical to the source, but sync said %d chunks were uploaded.", chunkCount)
+		if changeCount != fileStats.ChunkCount {
+			b.Fatalf("The sync of the test file should be identical to the source, but sync said %d chunks were uploaded.", fileStats.ChunkCount)
 		}
 
 		// remove the local copy of the file

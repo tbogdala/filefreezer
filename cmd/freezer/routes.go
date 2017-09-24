@@ -435,7 +435,7 @@ func handlePutFile(state *serverState) echo.HandlerFunc {
 		if req.ChunkCount < 0 {
 			return c.String(http.StatusBadRequest, "chunkCount must be supplied in the request")
 		}
-		if len(req.FileHash) < 1 {
+		if len(req.FileHash) < 1 && !req.IsDir {
 			return c.String(http.StatusBadRequest, "fileHash must be supplied in the request")
 		}
 

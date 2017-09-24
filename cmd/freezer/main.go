@@ -292,7 +292,15 @@ func main() {
 		}
 		defer state.close()
 		state.Storage.ChunkSize = *flagServeChunkSize
-		state.serve(nil)
+		quitCh := state.serve(nil)
+
+		// wait until server shutdown to Exit out
+		for {
+			select {
+			case <-quitCh:
+				os.Exit(0)
+			}
+		}
 
 	case cmdAddUser.FullCommand():
 		store, err := openStorage()

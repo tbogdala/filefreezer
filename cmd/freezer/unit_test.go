@@ -173,7 +173,7 @@ func TestEverything(t *testing.T) {
 
 	// test adding a file
 	filename := testFilename1
-	chunkCount, _, _, _, err := filefreezer.CalcFileHashInfo(cmdState.ServerCapabilities.ChunkSize, filename)
+	fileStats, err := filefreezer.CalcFileHashInfo(cmdState.ServerCapabilities.ChunkSize, filename)
 	if err != nil {
 		t.Fatalf("Failed to calculate the file hash for %s: %v", filename, err)
 	}
@@ -186,8 +186,8 @@ func TestEverything(t *testing.T) {
 	if syncStatus != command.SyncStatusLocalNewer {
 		t.Fatalf("Synced local file was not newer: %s", filename)
 	}
-	if ulCount != chunkCount {
-		t.Fatalf("Sync of local file didn't sync the expected number (%d) of chunks: got %d.", chunkCount, ulCount)
+	if ulCount != fileStats.ChunkCount {
+		t.Fatalf("Sync of local file didn't sync the expected number (%d) of chunks: got %d.", fileStats.ChunkCount, ulCount)
 	}
 
 	// at this point we should have a different revision
@@ -235,9 +235,9 @@ func TestEverything(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get the file chunk list for the file name given (%s): %v", filename, err)
 	}
-	if len(remoteChunks.Chunks) != chunkCount {
+	if len(remoteChunks.Chunks) != fileStats.ChunkCount {
 		t.Fatalf("The synced file %s doesn't have the correct number of chunks on the server (got:%d expected:%d). %v",
-			filename, len(remoteChunks.Chunks), chunkCount, remoteChunks)
+			filename, len(remoteChunks.Chunks), fileStats.ChunkCount, remoteChunks)
 	}
 
 	// at this point we should have the same revision

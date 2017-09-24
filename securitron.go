@@ -24,23 +24,39 @@ const (
 	defaultPasswordCost = 10 // analogus to bcrypt's DefaultCost
 )
 
+// FileStats is a structure used to return information about a given
+// file from the file system.
+type FileStats struct {
+	ChunkCount  int
+	LastMod     int64
+	Permissions uint32
+	HashString  string
+	IsDir       bool
+}
+
 // CalcFileHashInfo takes the file name and calculates the number of chunks, last modified time
 // and hash string for the file. An error is returned on failure.
-func CalcFileHashInfo(maxChunkSize int64, filename string) (chunkCount int, lastMod int64, permissions uint32, hashString string, e error) {
+func CalcFileHashInfo(maxChunkSize int64, filename string) (stats FileStats, e error) {
 	fileInfo, err := os.Stat(filename)
 	if err != nil {
 		e = fmt.Errorf("failed to stat the local file (%s) for the test: %v", filename, err)
 		return
 	}
 
-	lastMod = fileInfo.ModTime().UTC().Unix()
-	permissions = uint32(fileInfo.Mode())
+	stats.LastMod = fileInfo.ModTime().UTC().Unix()
+	stats.Permissions = uint32(fileInfo.Mode())
+
+	// is this a directory? if so, we set the flag and return
+	if fileInfo.IsDir() {
+		stats.IsDir = true
+		return stats, e
+	}
 
 	// calculate the chunk count required for the file size
 	fileSize := fileInfo.Size()
-	chunkCount = int(fileSize / maxChunkSize)
+	stats.ChunkCount = int(fileSize / maxChunkSize)
 	if fileSize%maxChunkSize != 0 {
-		chunkCount++
+		stats.ChunkCount++
 	}
 
 	// generate a hash for the test file
@@ -52,7 +68,7 @@ func CalcFileHashInfo(maxChunkSize int64, filename string) (chunkCount int, last
 	}
 	hasher.Write(fileBytes)
 	hash := hasher.Sum(nil)
-	hashString = base64.URLEncoding.EncodeToString(hash)
+	stats.HashString = base64.URLEncoding.EncodeToString(hash)
 
 	return
 }
