@@ -25,6 +25,12 @@ const (
 	SyncStatusSame        = 4 // local and remote files are the same
 )
 
+const (
+	// SyncCurrentVersion is the value to pass to SyncFile to sync the current version
+	// of the file and not a particular version number.
+	SyncCurrentVersion = 0
+)
+
 // SyncDirectory will take a localDir and recursively walk the filesystem calling SyncFile
 // for each file encountered. remoteDir can be specified to prefix the remote filepath
 // for each file. The total number of changed chunks is returned and upon error a non-nil
@@ -52,7 +58,7 @@ func (s *State) SyncDirectory(localDir string, remoteDir string) (changeCount in
 		// get all of the local files
 		localFileInfos, err := ioutil.ReadDir(localDir)
 		if err != nil {
-			return 0, fmt.Errorf("Failed to a list of local file names: %v", err)
+			return 0, fmt.Errorf("Failed to get a list of local file names: %v", err)
 		}
 
 		// sync all of the local files
@@ -72,7 +78,7 @@ func (s *State) SyncDirectory(localDir string, remoteDir string) (changeCount in
 			}
 
 			// attempt the local file sync operation
-			_, changes, err := s.SyncFile(localFileName, remoteFileName)
+			_, changes, err := s.SyncFile(localFileName, remoteFileName, SyncCurrentVersion)
 			if err != nil {
 				return changeCount, fmt.Errorf("Failed to sync local file (%s) with the remote file (%s): %v", localFileName, remoteFileName, err)
 			}
@@ -124,7 +130,7 @@ func (s *State) SyncDirectory(localDir string, remoteDir string) (changeCount in
 		}
 
 		// attempt the remote file sync
-		_, changes, err := s.SyncFile(localFileName, remoteFileName)
+		_, changes, err := s.SyncFile(localFileName, remoteFileName, SyncCurrentVersion)
 		if err != nil {
 			return changeCount, fmt.Errorf("Failed to sync remote file (%s) with the local file (%s): %v", remoteFileName, localFileName, err)
 		}
@@ -137,10 +143,11 @@ func (s *State) SyncDirectory(localDir string, remoteDir string) (changeCount in
 }
 
 // SyncFile will synchronize the localFilename which is identified as remoteFilepath on the server.
+// A versionNum can also be specified (or left at <=0 for current version) to pick a particular version to sync.
 // A sync status enumeration value is returned indicating if chunks were missing or whether or not
 // the local or remote version were considered newer. The number of chunks changes is also returned and
 // a non-nil error value is returned on error.
-func (s *State) SyncFile(localFilename string, remoteFilepath string) (status int, changeCount int, e error) {
+func (s *State) SyncFile(localFilename string, remoteFilepath string, versionNum int) (status int, changeCount int, e error) {
 	// get the file information for the filename, which provides
 	// all of the information necessary to determine what to sync.
 	remote, err := s.GetFileInfoByFilename(remoteFilepath)
@@ -161,19 +168,40 @@ func (s *State) SyncFile(localFilename string, remoteFilepath string) (status in
 	}
 
 	// we got a valid response so the file is registered on the server;
-	// continue checking...
+	// pull all of the versions for this file so that we can target the
+	// correct VersionID for a given versionNum.
+	var syncVersion *filefreezer.FileVersionInfo
+	if versionNum != SyncCurrentVersion {
+		versions, err := s.GetFileVersions(remoteFilepath)
+		if err != nil {
+			return 0, 0, fmt.Errorf("Couldn't get all of the file version for %s: %v", remoteFilepath, err)
+		}
+		for _, v := range versions {
+			if v.VersionNumber == versionNum {
+				syncVersion = &v
+				break
+			}
+		}
+	}
+
+	// if we were not looking for the current version or the version number
+	// specified was not found in the list of file versions, then set the
+	// versionID to sync against to the current version ID for the file.
+	if syncVersion == nil {
+		syncVersion = &remote.CurrentVersion
+	}
 
 	if _, err := os.Stat(localFilename); os.IsNotExist(err) {
 		// if it is a local file that doesn't exist then download the file from the
 		// server if it is registered there.
 		if !remote.IsDir {
-			dlCount, err := s.syncDownload(remote.FileID, remote.CurrentVersion.VersionID, localFilename,
-				remoteFilepath, remote.CurrentVersion.ChunkCount)
+			dlCount, err := s.syncDownload(remote.FileID, syncVersion.VersionID, localFilename,
+				remoteFilepath, syncVersion.ChunkCount)
 			return SyncStatusRemoteNewer, dlCount, err
 		}
 
 		// if its a local directory that doesn't exist, then just create the directory
-		err = os.MkdirAll(localFilename, os.ModeDir|os.FileMode(remote.CurrentVersion.Permissions))
+		err = os.MkdirAll(localFilename, os.ModeDir|os.FileMode(syncVersion.Permissions))
 		if err != nil {
 			return SyncStatusRemoteNewer, 0, err
 		}
@@ -181,6 +209,9 @@ func (s *State) SyncFile(localFilename string, remoteFilepath string) (status in
 		s.Printf("%s <== directory created", remoteFilepath)
 		return SyncStatusRemoteNewer, 0, nil
 	}
+
+	// At this point the it is registered on the server and the local file exists,
+	// so it is time to calculate hash information and do comparisons ...
 
 	// calculate some of the local file information
 	localStats, err := filefreezer.CalcFileHashInfo(s.ServerCapabilities.ChunkSize, localFilename)
@@ -195,6 +226,17 @@ func (s *State) SyncFile(localFilename string, remoteFilepath string) (status in
 	// which is authoritative.
 	if localStats.IsDir {
 		return SyncStatusSame, 0, nil
+	}
+
+	// handle a special case here for when a particular version is requested that
+	// is not the current version. in this case we will compare file hashes and
+	// download the remote version of the file if the hashes are not equal
+	if syncVersion.VersionID != remote.CurrentVersion.VersionID {
+		if localStats.HashString != syncVersion.FileHash {
+			dlCount, err := s.syncDownload(remote.FileID, syncVersion.VersionID, localFilename,
+				remoteFilepath, syncVersion.ChunkCount)
+			return SyncStatusRemoteNewer, dlCount, err
+		}
 	}
 
 	// pull the list of missing chunks for the file

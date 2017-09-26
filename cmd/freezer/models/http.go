@@ -69,8 +69,7 @@ type NewFileVersionResponse struct {
 // FileGetAllVersionsResponse is the  JSON serializable response given by the
 // /api/file/{fileid}/versions GET handler.
 type FileGetAllVersionsResponse struct {
-	VersionIDs     []int
-	VersionNumbers []int
+	Versions     []filefreezer.FileVersionInfo
 }
 
 // FileGetByNameRequest is the JSON structure to be sent to the

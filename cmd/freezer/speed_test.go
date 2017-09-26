@@ -70,7 +70,7 @@ func doBenchBasicFileSyncUp(testFileSize int, b *testing.B) {
 	// loop: sync a file
 	for n := 0; n < b.N; n++ {
 		destFilename := fmt.Sprintf("bench_data_%08d.dat", n)
-		_, _, err := cmdState.SyncFile(testFilename, destFilename)
+		_, _, err := cmdState.SyncFile(testFilename, destFilename, command.SyncCurrentVersion)
 		if err != nil {
 			b.Fatalf("Failed to at the file %s: %v", testFilename, err)
 		}
@@ -101,7 +101,7 @@ func doBenchBasicFileSyncDown(testFileSize int, b *testing.B) {
 	}
 
 	// sync the test file to the server
-	_, _, err = cmdState.SyncFile(testFilename, testFilename)
+	_, _, err = cmdState.SyncFile(testFilename, testFilename, command.SyncCurrentVersion)
 	//_, err = cmdState.addFile(testFilename, testFilename, false, permissions, lastMod, chunkCount, hashString)
 	if err != nil {
 		b.Fatalf("Failed to at the file %s: %v", testFilename, err)
@@ -118,7 +118,7 @@ func doBenchBasicFileSyncDown(testFileSize int, b *testing.B) {
 	// loop: sync a file
 	for n := 0; n < b.N; n++ {
 		localFilename := fmt.Sprintf("bench_data_local_%08d.dat", n)
-		status, changeCount, err := cmdState.SyncFile(localFilename, testFilename)
+		status, changeCount, err := cmdState.SyncFile(localFilename, testFilename, command.SyncCurrentVersion)
 		if err != nil {
 			b.Fatalf("Failed to sync the file %s from the server: %v", localFilename, err)
 		}

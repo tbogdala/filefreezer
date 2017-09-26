@@ -251,14 +251,13 @@ func handleGetAllFileVersion(state *serverState) echo.HandlerFunc {
 		}
 
 		// get all the versions associated with the file in storage
-		versionIDs, versionNums, err := state.Storage.GetFileVersions(fi.FileID)
+		versions, err := state.Storage.GetFileVersions(fi.FileID)
 		if err != nil {
 			return c.String(http.StatusNotFound, "Failed to get file versions for the user.")
 		}
 
 		return c.JSON(http.StatusOK, &models.FileGetAllVersionsResponse{
-			VersionIDs:     versionIDs,
-			VersionNumbers: versionNums,
+			Versions:     versions,
 		})
 	}
 }

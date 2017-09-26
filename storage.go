@@ -91,7 +91,7 @@ const (
 	addFileVersion         = `INSERT INTO FileVersion (FileID, VersionNum, Perms, LastMod, ChunkCount, FileHash) VALUES (?, ?, ?, ?, ?, ?);`
 	getFileVersionByID     = `SELECT VersionNum, Perms, LastMod, ChunkCount, FileHash FROM FileVersion WHERE VersionID = ?;`
 	removeFileVersionsByID = `DELETE FROM FileVersion WHERE FileID = ?;`
-	getVersionIDsForFile   = `SELECT VersionID, VersionNum FROM FileVersion WHERE FileID = ?;`
+	getVersionsForFile     = `SELECT VersionID, VersionNum, Perms, LastMod, ChunkCount, FileHash FROM FileVersion WHERE FileID = ?;`
 
 	getAllFileChunksByID  = `SELECT ChunkNum, ChunkHash FROM FileChunks WHERE FileID = ? AND VersionID = ?;`
 	addFileChunk          = `INSERT OR REPLACE INTO FileChunks (FileID, VersionID, ChunkNum, ChunkHash, Chunk) VALUES (?, ?, ?, ?, ?);`
@@ -771,28 +771,27 @@ func (s *Storage) GetFileInfoByName(userID int, filename string) (*FileInfo, err
 	return fi, nil
 }
 
-// GetFileVersions will return a slice of version IDs and a matching version number slice for
-// a given file ID.
-func (s *Storage) GetFileVersions(fileID int) (versionIDs []int, versionNums []int, err error) {
+// GetFileVersions will return a slice of FileVersionInfo that encompases all of the 
+// versions registered for a given file ID.
+func (s *Storage) GetFileVersions(fileID int) ([]FileVersionInfo, error) {
 	// pull the current version data
-	rows, err := s.db.Query(getVersionIDsForFile, fileID)
+	rows, err := s.db.Query(getVersionsForFile, fileID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get the file versions for a given file id (%d): %v", fileID, err)
+		return nil, fmt.Errorf("failed to get the file versions for a given file id (%d): %v", fileID, err)
 	}
 	defer rows.Close()
 
-	var versionID int
-	var versionNumber int
+	result := make([]FileVersionInfo, 0)
+	var vi FileVersionInfo
 	for rows.Next() {
-		err := rows.Scan(&versionID, &versionNumber)
+		err := rows.Scan(&vi.VersionID, &vi.VersionNumber, &vi.Permissions, &vi.LastMod, &vi.ChunkCount, &vi.FileHash)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to scan the next row while processing files versions for fileID %d: %v", fileID, err)
+			return nil, fmt.Errorf("failed to scan the next row while processing files versions for fileID %d: %v", fileID, err)
 		}
-		versionIDs = append(versionIDs, versionID)
-		versionNums = append(versionNums, versionNumber)
+		result = append(result, vi)
 	}
 
-	return versionIDs, versionNums, nil
+	return result, nil
 }
 
 // TagNewFileVersion creates a new version of a given file and returns the new version ID

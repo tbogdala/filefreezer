@@ -6,7 +6,6 @@ package command
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/tbogdala/filefreezer"
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
@@ -76,10 +75,10 @@ func (s *State) RmFileByID(fileID int) error {
 
 // GetFileVersions will return a slice of global version IDs and a matching
 // slice of version numbers for the filename provided. A non-nil error is returned on error.
-func (s *State) GetFileVersions(filename string) (versionIDs []int, versionNums []int, err error) {
+func (s *State) GetFileVersions(filename string) (versions []filefreezer.FileVersionInfo, err error) {
 	fi, err := s.GetFileInfoByFilename(filename)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// get the file id for the filename provided
@@ -88,18 +87,10 @@ func (s *State) GetFileVersions(filename string) (versionIDs []int, versionNums 
 	var r models.FileGetAllVersionsResponse
 	err = json.Unmarshal(body, &r)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to get the file versions: %v", err)
+		return nil, fmt.Errorf("Failed to get the file versions: %v", err)
 	}
 
-	s.Printf("Registered versions for %s:\n", filename)
-	s.Println(strings.Repeat("=", 25+len(filename)))
-
-	// loop through all of the results and print them
-	for i, vID := range r.VersionIDs {
-		s.Printf("Version ID: %d\t\tNumber: %d", vID, r.VersionNumbers[i])
-	}
-
-	return r.VersionIDs, r.VersionNumbers, nil
+	return r.Versions, nil
 }
 
 // GetMissingChunksForFile will return a slice of chunk numbers (index starts at zero and

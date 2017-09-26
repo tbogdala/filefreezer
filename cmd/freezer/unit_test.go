@@ -84,6 +84,7 @@ func TestMain(m *testing.M) {
 	}
 
 	// make sure the test data folder exists
+	os.RemoveAll(testDataDir2)
 	os.MkdirAll(testDataDir2, os.ModeDir|os.ModePerm)
 
 	// write out some random files
@@ -180,7 +181,7 @@ func TestEverything(t *testing.T) {
 	}
 	t.Logf("Calculated hash data for %s ...", filename)
 
-	syncStatus, ulCount, err := cmdState.SyncFile(filename, filename)
+	syncStatus, ulCount, err := cmdState.SyncFile(filename, filename, command.SyncCurrentVersion)
 	if err != nil {
 		t.Fatalf("Failed to at the file %s: %v", filename, err)
 	}
@@ -202,7 +203,7 @@ func TestEverything(t *testing.T) {
 	}
 
 	// now that the file is registered, sync the data
-	syncStatus, ulCount, err = cmdState.SyncFile(filename, filename)
+	syncStatus, ulCount, err = cmdState.SyncFile(filename, filename, command.SyncCurrentVersion)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s to the server: %v", filename, err)
 	}
@@ -257,7 +258,7 @@ func TestEverything(t *testing.T) {
 	ioutil.WriteFile(filename, rando1, os.ModePerm)
 
 	// now that the file is regenerated, sync the data
-	syncStatus, ulCount, err = cmdState.SyncFile(filename, filename)
+	syncStatus, ulCount, err = cmdState.SyncFile(filename, filename, command.SyncCurrentVersion)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s to the server: %v", filename, err)
 	}
@@ -294,7 +295,7 @@ func TestEverything(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to delete the local test file %s: %v", filename, err)
 	}
-	syncStatus, dlCount, err := cmdState.SyncFile(filename, filename)
+	syncStatus, dlCount, err := cmdState.SyncFile(filename, filename, command.SyncCurrentVersion)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s from the server: %v", filename, err)
 	}
@@ -339,7 +340,7 @@ func TestEverything(t *testing.T) {
 	}
 
 	// syncing again should pull a new copy down
-	syncStatus, dlCount, err = cmdState.SyncFile(filename, filename)
+	syncStatus, dlCount, err = cmdState.SyncFile(filename, filename, command.SyncCurrentVersion)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s from the server: %v", filename, err)
 	}
@@ -371,7 +372,7 @@ func TestEverything(t *testing.T) {
 
 	// test syncing a file not registered on the server
 	filename = testFilename2
-	syncStatus, ulCount, err = cmdState.SyncFile(filename, filename)
+	syncStatus, ulCount, err = cmdState.SyncFile(filename, filename, command.SyncCurrentVersion)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s from the server: %v", filename, err)
 	}
@@ -398,7 +399,7 @@ func TestEverything(t *testing.T) {
 
 	// effectively make a copy of the file by adding a test file under a different target path
 	aliasedFilename := "testFolder/" + filename
-	syncStatus, ulCount, err = cmdState.SyncFile(filename, aliasedFilename)
+	syncStatus, ulCount, err = cmdState.SyncFile(filename, aliasedFilename, command.SyncCurrentVersion)
 	if err != nil {
 		t.Fatalf("Failed to sync the file %s from the server: %v", filename, err)
 	}
@@ -567,7 +568,7 @@ func TestEverything(t *testing.T) {
 	emptyFile.Close()
 
 	// test to make sure we can sync the empty file
-	syncStatus, ulCount, err = cmdState.SyncFile(testFilename4, testFilename4)
+	syncStatus, ulCount, err = cmdState.SyncFile(testFilename4, testFilename4, command.SyncCurrentVersion)
 	if err != nil {
 		t.Fatalf("Failed to sync the empty file %s to the server: %v", testFilename4, err)
 	}
@@ -582,7 +583,7 @@ func TestEverything(t *testing.T) {
 	os.Remove(testFilename4)
 
 	// test downloading it through a sync
-	syncStatus, dlCount, err = cmdState.SyncFile(testFilename4, testFilename4)
+	syncStatus, dlCount, err = cmdState.SyncFile(testFilename4, testFilename4, command.SyncCurrentVersion)
 	if err != nil {
 		t.Fatalf("Failed to sync the empty file %s from the server: %v", testFilename4, err)
 	}
@@ -594,11 +595,11 @@ func TestEverything(t *testing.T) {
 	}
 
 	// create an empty directory and attempt to sync it
-	err = os.MkdirAll(testDataDir3, os.ModeDir)
+	err = os.MkdirAll(testDataDir3, os.ModeDir|os.FileMode(0777))
 	if err != nil {
 		t.Fatalf("Failed to create the empty test directory: %v", err)
 	}
-	syncStatus, dlCount, err = cmdState.SyncFile(testDataDir3, testDataDir3)
+	syncStatus, dlCount, err = cmdState.SyncFile(testDataDir3, testDataDir3, command.SyncCurrentVersion)
 	if err != nil {
 		t.Fatalf("Failed to sync the empty directory %s to the server: %v", testDataDir3, err)
 	}
@@ -610,7 +611,7 @@ func TestEverything(t *testing.T) {
 	}
 
 	// syncing again should return the Same status
-	syncStatus, dlCount, err = cmdState.SyncFile(testDataDir3, testDataDir3)
+	syncStatus, dlCount, err = cmdState.SyncFile(testDataDir3, testDataDir3, command.SyncCurrentVersion)
 	if err != nil {
 		t.Fatalf("Failed to sync the empty directory %s from the server: %v", testDataDir3, err)
 	}
@@ -628,7 +629,7 @@ func TestEverything(t *testing.T) {
 	}
 
 	// syncing again should recreate the directory
-	syncStatus, dlCount, err = cmdState.SyncFile(testDataDir3, testDataDir3)
+	syncStatus, dlCount, err = cmdState.SyncFile(testDataDir3, testDataDir3, command.SyncCurrentVersion)
 	if err != nil {
 		t.Fatalf("Failed to sync the empty directory %s from the server: %v", testDataDir3, err)
 	}
@@ -653,14 +654,18 @@ func TestFileVersioning(t *testing.T) {
 	username := "admin"
 	password := "1234"
 	userQuota := int(1e9)
-	cmdState.RmUser(state.Storage, username)
-	user := cmdState.AddUser(state.Storage, username, password, userQuota)
+
+	user, err := state.Storage.GetUser("admin")
+	if user != nil {
+		cmdState.RmUser(state.Storage, username)
+	}
+	user = cmdState.AddUser(state.Storage, username, password, userQuota)
 	if user == nil {
 		t.Fatalf("Failed to add the test user (%s) to Storage", username)
 	}
 
 	// attempt to get the authentication token
-	err := cmdState.Authenticate(testHost, username, password)
+	err = cmdState.Authenticate(testHost, username, password)
 	if err != nil {
 		t.Fatalf("Failed to authenticate as the test user: %v", err)
 	}
@@ -697,7 +702,7 @@ func TestFileVersioning(t *testing.T) {
 
 	// add the file information to the storage server
 	filename := testFilename1
-	_, _, err = cmdState.SyncFile(filename, filename)
+	_, _, err = cmdState.SyncFile(filename, filename, command.SyncCurrentVersion)
 	if err != nil {
 		t.Fatalf("Failed to at the file %s: %v", filename, err)
 	}
@@ -711,15 +716,15 @@ func TestFileVersioning(t *testing.T) {
 	}
 
 	// make sure there's only one file version regiestered for the file
-	versionIDs, versionNums, err := cmdState.GetFileVersions(filename)
+	versions, err := cmdState.GetFileVersions(filename)
 	if err != nil {
 		t.Fatalf("Failed to get the file versions for the test file: %v", err)
 	}
-	if len(versionIDs) != 1 || len(versionNums) != 1 {
-		t.Fatalf("Expected to get one file version for the test file but received %d.", len(versionIDs))
+	if len(versions) != 1 {
+		t.Fatalf("Expected to get one file version for the test file but received %d.", len(versions))
 	}
-	if versionNums[0] != 1 {
-		t.Fatalf("The first version number for the test file was not 1, it was %d.", versionNums[0])
+	if versions[0].VersionNumber != 1 {
+		t.Fatalf("The first version number for the test file was not 1, it was %d.", versions[0].VersionNumber)
 	}
 
 	// make sure the user quota updated correctly
@@ -741,7 +746,7 @@ func TestFileVersioning(t *testing.T) {
 	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
 
 	// upload a newer version of the file
-	status, _, err := cmdState.SyncFile(filename, filename)
+	status, _, err := cmdState.SyncFile(filename, filename, command.SyncCurrentVersion)
 	if err != nil {
 		t.Fatalf("Error while updating file to a newer version via sync: %v", err)
 	}
@@ -758,13 +763,18 @@ func TestFileVersioning(t *testing.T) {
 	}
 
 	// verify that we get two versions back for the given file ID
-	versionIDs, versionNums, err = cmdState.GetFileVersions(filename)
+	versions, err = cmdState.GetFileVersions(filename)
 	if err != nil {
 		t.Fatalf("Failed to get the file versions for the test file: %v", err)
 	}
-	if len(versionIDs) != 2 || len(versionNums) != 2 {
-		t.Fatalf("Expected to get two file versions for the test file but received %d.", len(versionIDs))
+	if len(versions) != 2 {
+		t.Fatalf("Expected to get two file versions for the test file but received %d.", len(versions))
 	}
+
+	// set this variable to use later on to test reverting back to a previous
+	// version of a file
+	callbackVersion := versions[1]
+	callbackBytes := rando1
 
 	// make sure the user quota updated correctly
 	bytesAllocated += len(rando1) + 28*3 // bonus crypto for each chunk
@@ -782,7 +792,7 @@ func TestFileVersioning(t *testing.T) {
 	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
 
 	// upload a newer version of the file
-	status, _, err = cmdState.SyncFile(filename, filename)
+	status, _, err = cmdState.SyncFile(filename, filename, command.SyncCurrentVersion)
 	if err != nil {
 		t.Fatalf("Error while updating file to a newer version via sync: %v", err)
 	}
@@ -799,12 +809,12 @@ func TestFileVersioning(t *testing.T) {
 	}
 
 	// verify that we get three versions back for the given file ID
-	versionIDs, versionNums, err = cmdState.GetFileVersions(filename)
+	versions, err = cmdState.GetFileVersions(filename)
 	if err != nil {
 		t.Fatalf("Failed to get the file versions for the test file: %v", err)
 	}
-	if len(versionIDs) != 3 || len(versionNums) != 3 {
-		t.Fatalf("Expected to get three file versions for the test file but received %d.", len(versionIDs))
+	if len(versions) != 3 {
+		t.Fatalf("Expected to get three file versions for the test file but received %d.", len(versions))
 	}
 
 	// make sure the user quota updated correctly
@@ -823,7 +833,7 @@ func TestFileVersioning(t *testing.T) {
 	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
 
 	// upload a newer version of the file
-	status, _, err = cmdState.SyncFile(filename, filename)
+	status, _, err = cmdState.SyncFile(filename, filename, command.SyncCurrentVersion)
 	if err != nil {
 		t.Fatalf("Error while updating file to a newer version via sync: %v", err)
 	}
@@ -840,12 +850,12 @@ func TestFileVersioning(t *testing.T) {
 	}
 
 	// verify that we get four versions back for the given file ID
-	versionIDs, versionNums, err = cmdState.GetFileVersions(filename)
+	versions, err = cmdState.GetFileVersions(filename)
 	if err != nil {
 		t.Fatalf("Failed to get the file versions for the test file: %v", err)
 	}
-	if len(versionIDs) != 4 || len(versionNums) != 4 {
-		t.Fatalf("Expected to get four versions for the test file but received %d.", len(versionIDs))
+	if len(versions) != 4 {
+		t.Fatalf("Expected to get four versions for the test file but received %d.", len(versions))
 	}
 
 	// make sure the user quota updated correctly
@@ -864,7 +874,7 @@ func TestFileVersioning(t *testing.T) {
 	ioutil.WriteFile(testFilename1, rando1, os.ModePerm)
 
 	// upload a newer version of the file
-	status, _, err = cmdState.SyncFile(filename, filename)
+	status, _, err = cmdState.SyncFile(filename, filename, command.SyncCurrentVersion)
 	if err != nil {
 		t.Fatalf("Error while updating file to a newer version via sync: %v", err)
 	}
@@ -881,12 +891,12 @@ func TestFileVersioning(t *testing.T) {
 	}
 
 	// verify that we get five versions back for the given file ID
-	versionIDs, versionNums, err = cmdState.GetFileVersions(filename)
+	versions, err = cmdState.GetFileVersions(filename)
 	if err != nil {
 		t.Fatalf("Failed to get the file versions for the test file: %v", err)
 	}
-	if len(versionIDs) != 5 || len(versionNums) != 5 {
-		t.Fatalf("Expected to get five file versions for the test file but received %d.", len(versionIDs))
+	if len(versions) != 5 {
+		t.Fatalf("Expected to get five file versions for the test file but received %d.", len(versions))
 	}
 
 	// make sure the user quota updated correctly
@@ -897,6 +907,26 @@ func TestFileVersioning(t *testing.T) {
 	}
 	if userStats.Allocated != bytesAllocated {
 		t.Fatalf("Expected %d bytes allocated but the server returned %d.", bytesAllocated, userStats.Allocated)
+	}
+
+	///////////////////////////////////////////////////////////////////////////
+	// get a previous version of the file
+	status, _, err = cmdState.SyncFile(filename, filename, callbackVersion.VersionNumber)
+	if err != nil {
+		t.Fatalf("Error while updating file to a pervious version via sync: %v", err)
+	}
+	if status != command.SyncStatusRemoteNewer {
+		t.Fatalf("Failed to correctly sync the previous version of a test file: status wasn't remote newer (%v).", status)
+	}
+
+	// verify that the file got reverted back to the previous version bytes
+	previousBytes, err := ioutil.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("Error while attempting to read local file to verify sync of a previous version: %v", err)
+	}
+
+	if bytes.Compare(previousBytes, callbackBytes) != 0 {
+		t.Fatal("Differences were found in the local file with respect to previous version when they should have been the same")
 	}
 }
 

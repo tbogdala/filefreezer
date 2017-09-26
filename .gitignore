@@ -10,6 +10,7 @@ cmd/freezer/freezer.crt
 cmd/freezer/freezer.exe*
 cmd/freezer/freezer.db*
 cmd/freezer/freezer.test*
+cmd/freezer/debug.test*
 cmd/freezer/testdata
 tests/*.dat
 vendor

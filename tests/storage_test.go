@@ -650,15 +650,15 @@ func TestFileVersioning(t *testing.T) {
 	}
 
 	// make sure there's only one file version regiestered for the file
-	versionIDs, versionNums, err := store.GetFileVersions(fi.FileID)
+	versions, err := store.GetFileVersions(fi.FileID)
 	if err != nil {
 		t.Fatalf("Failed to get the file versions for the test file: %v", err)
 	}
-	if len(versionIDs) != 1 || len(versionNums) != 1 {
-		t.Fatalf("Expected to get one file version for the test file but received %d.", len(versionIDs))
+	if len(versions) != 1 {
+		t.Fatalf("Expected to get one file version for the test file but received %d.", len(versions))
 	}
-	if versionNums[0] != 1 {
-		t.Fatalf("The first version number for the test file was not 1, it was %d.", versionNums[0])
+	if versions[0].VersionNumber != 1 {
+		t.Fatalf("The first version number for the test file was not 1, it was %d.", versions[0].VersionNumber)
 	}
 
 	// make sure the user quota updated correctly
@@ -715,12 +715,12 @@ func TestFileVersioning(t *testing.T) {
 	}
 
 	// verify that we get two versions back for the given file ID
-	versionIDs, versionNums, err = store.GetFileVersions(fiV2.FileID)
+	versions, err = store.GetFileVersions(fiV2.FileID)
 	if err != nil {
 		t.Fatalf("Failed to get the file versions for the test file: %v", err)
 	}
-	if len(versionIDs) != 2 || len(versionNums) != 2 {
-		t.Fatalf("Expected to get two file versions for the test file but received %d.", len(versionIDs))
+	if len(versions) != 2 {
+		t.Fatalf("Expected to get two file versions for the test file but received %d.", len(versions))
 	}
 
 	// make sure the user quota updated correctly
@@ -774,12 +774,12 @@ func TestFileVersioning(t *testing.T) {
 	}
 
 	// verify that we get three versions back for the given file ID
-	versionIDs, versionNums, err = store.GetFileVersions(fiV3.FileID)
+	versions, err = store.GetFileVersions(fiV3.FileID)
 	if err != nil {
 		t.Fatalf("Failed to get the file versions for the test file: %v", err)
 	}
-	if len(versionIDs) != 3 || len(versionNums) != 3 {
-		t.Fatalf("Expected to get three file versions for the test file but received %d.", len(versionIDs))
+	if len(versions) != 3 {
+		t.Fatalf("Expected to get three file versions for the test file but received %d.", len(versions))
 	}
 
 	// make sure the user quota updated correctly
@@ -833,12 +833,12 @@ func TestFileVersioning(t *testing.T) {
 	}
 
 	// verify that we get four versions back for the given file ID
-	versionIDs, versionNums, err = store.GetFileVersions(fiV4.FileID)
+	versions, err = store.GetFileVersions(fiV4.FileID)
 	if err != nil {
 		t.Fatalf("Failed to get the file versions for the test file: %v", err)
 	}
-	if len(versionIDs) != 4 || len(versionNums) != 4 {
-		t.Fatalf("Expected to get four versions for the test file but received %d.", len(versionIDs))
+	if len(versions) != 4 {
+		t.Fatalf("Expected to get four versions for the test file but received %d.", len(versions))
 	}
 
 	// make sure the user quota updated correctly
@@ -892,12 +892,12 @@ func TestFileVersioning(t *testing.T) {
 	}
 
 	// verify that we get five versions back for the given file ID
-	versionIDs, versionNums, err = store.GetFileVersions(fiV5.FileID)
+	versions, err = store.GetFileVersions(fiV5.FileID)
 	if err != nil {
 		t.Fatalf("Failed to get the file versions for the test file: %v", err)
 	}
-	if len(versionIDs) != 5 || len(versionNums) != 5 {
-		t.Fatalf("Expected to get five file versions for the test file but received %d.", len(versionIDs))
+	if len(versions) != 5 {
+		t.Fatalf("Expected to get five file versions for the test file but received %d.", len(versions))
 	}
 
 	// make sure the user quota updated correctly

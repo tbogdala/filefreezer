@@ -63,9 +63,10 @@ var (
 	cmdRmFile     = appFlags.Command("rmfile", "Remove a file from storage.")
 	argRmFilePath = cmdRmFile.Arg("filename", "The file to remove on the server.").Required().String()
 
-	cmdSync       = appFlags.Command("sync", "Synchronizes a path with the server.")
-	argSyncPath   = cmdSync.Arg("filepath", "The file to sync with the server.").Required().String()
-	argSyncTarget = cmdSync.Arg("target", "The file path to sync to on the server; defaults to the same as the filename arg.").Default("").String()
+	cmdSync         = appFlags.Command("sync", "Synchronizes a path with the server.")
+	flagSyncVersion = cmdSync.Flag("version", "Specifies a version number to sync instead of the current version").Int()
+	argSyncPath     = cmdSync.Arg("filepath", "The file to sync with the server.").Required().String()
+	argSyncTarget   = cmdSync.Arg("target", "The file path to sync to on the server; defaults to the same as the filename arg.").Default("").String()
 
 	cmdSyncDir       = appFlags.Command("syncdir", "Synchronizes a directory with the server.")
 	argSyncDirPath   = cmdSyncDir.Arg("dirpath", "The directory to sync with the server.").Required().String()
@@ -402,9 +403,19 @@ func main() {
 			log.Fatalf("Failed to initialize cryptography: %v", err)
 		}
 
-		_, _, err = cmdState.GetFileVersions(*argGetFileVersionsTarget)
+		versions, err := cmdState.GetFileVersions(*argGetFileVersionsTarget)
 		if err != nil {
 			log.Fatalf("Failed to get the file versions for the user %s from the storage server %s: %v", username, host, err)
+		}
+
+		cmdState.Printf("Registered versions for %s:\n", *argGetFileVersionsTarget)
+		cmdState.Println(strings.Repeat("=", 25+len(*argGetFileVersionsTarget)))
+	
+		// loop through all of the results and print them
+		for _, version := range versions {
+			modTime := time.Unix(version.LastMod, 0)
+			cmdState.Printf("Version ID: %d\t\tNumber: %d\t\tLastMod: %s", 
+				version.VersionID, version.VersionNumber, modTime.Format(time.UnixDate))
 		}
 
 	case cmdRmFile.FullCommand():
@@ -448,7 +459,14 @@ func main() {
 		if len(remoteFilepath) < 1 {
 			remoteFilepath = filepath
 		}
-		_, _, err = cmdState.SyncFile(filepath, remoteFilepath)
+
+		// check to see if a flag was specified to sync a particular version number
+		syncVersion := *flagSyncVersion
+		if syncVersion <= 0 {
+			syncVersion = command.SyncCurrentVersion
+		}
+
+		_, _, err = cmdState.SyncFile(filepath, remoteFilepath, syncVersion)
 		if err != nil {
 			log.Fatalf("Failed to synchronize the path %s: %v", filepath, err)
 		}

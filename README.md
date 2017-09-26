@@ -79,8 +79,6 @@ With the server running you can now execute commands, such as:
 Known Bugs and Limitations
 --------------------------
 
-* Empty directories do not get synced. 
-
 * Consider a quota for max fileinfo registered so service cannot be DDOS'd 
   by registering infinite files.
 
@@ -88,8 +86,6 @@ Known Bugs and Limitations
   Consider bumping the revision with new files are added or otherwise changed too.
 
 * userid is taken on some Storage methods, but not all, for checking correct user is accessing data
-
-* cli flag to sync against a particular version
 
 * cli command to purge some/all of stored file versions
 
@@ -121,11 +117,7 @@ TODO / Notes
 
 * work on readability of error messages wrt bubbling up error objects
 
-* vendor the dependencies; possibly with go dep
-
 * set env variable for auth key on login so that subsequent cli requests
   can use the same auth token which will improve perf on big batch of ops
-
-* ability to purge version history
 
 * multithreading the chunk uploading of files
