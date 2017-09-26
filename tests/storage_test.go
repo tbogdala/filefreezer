@@ -51,10 +51,16 @@ func TestQuotasAndPermissions(t *testing.T) {
 		t.Fatalf("Failed to create tables for testing. %v", err)
 	}
 
-	// test to make sure calling this again fails
+	// test to make sure calling this again does not fail
 	err = store.CreateTables()
-	if err == nil {
-		t.Fatal("Create duplicate tables worked when it should return an error")
+	if err != nil {
+		t.Fatalf("Create duplicate tables did not work when it should have. %v", err)
+	}
+
+	// make sure the table was created with the current DB version number
+	dbVersion, err := store.GetDBVersion()
+	if err != nil || dbVersion != filefreezer.CurrentDBVersion {
+		t.Fatalf("Storage DB doesn't have current DB Version number set (got %d).", dbVersion)
 	}
 
 	///////////////////////////////////////////////////////////////////////////
@@ -175,10 +181,10 @@ func TestBasicDBCreation(t *testing.T) {
 		t.Fatalf("Failed to create tables for testing. %v", err)
 	}
 
-	// test to make sure calling this again fails
+	// test to make sure calling this again does not fail
 	err = store.CreateTables()
-	if err == nil {
-		t.Fatal("Create duplicate tables worked when it should return an error")
+	if err != nil {
+		t.Fatalf("Create duplicate tables didn't work when it should have. %v", err)
 	}
 
 	///////////////////////////////////////////////////////////////////////////

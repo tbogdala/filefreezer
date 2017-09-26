@@ -13,7 +13,17 @@ import (
 )
 
 const (
-	createUsersTable = `CREATE TABLE Users (
+	// CurrentDBVersion is set to the current database version and is used
+	// by filefreezer to detect when the database tables need to get updated.
+	CurrentDBVersion = 1
+)
+
+const (
+	createAppDataTable = `CREATE TABLE IF NOT EXISTS AppData (
+		DBVersion	INTEGER				NOT NULL
+	);`
+
+	createUsersTable = `CREATE TABLE IF NOT EXISTS Users (
         UserID 		INTEGER PRIMARY KEY	NOT NULL,
         Name		TEXT	UNIQUE		NOT NULL ON CONFLICT ABORT,
 		Salt		TEXT				NOT NULL,
@@ -21,14 +31,14 @@ const (
 		CryptoHash  BLOB                
     );`
 
-	createUserStatsTable = `CREATE TABLE UserStats (
+	createUserStatsTable = `CREATE TABLE IF NOT EXISTS UserStats (
         UserID 		INTEGER PRIMARY KEY	NOT NULL,
         Quota		INTEGER				NOT NULL,
         Allocated	INTEGER				NOT NULL,
         Revision	INTEGER				NOT NULL
     );`
 
-	createFileInfoTable = `CREATE TABLE FileInfo (
+	createFileInfoTable = `CREATE TABLE IF NOT EXISTS FileInfo (
         FileID 	          INTEGER PRIMARY KEY  NOT NULL,
         UserID 		      INTEGER              NOT NULL,
         FileName	      TEXT                 NOT NULL,
@@ -36,7 +46,7 @@ const (
         CurrentVersionID  INTEGER              NOT NULL
       );`
 
-	createFileVersionTable = `CREATE TABLE FileVersion (
+	createFileVersionTable = `CREATE TABLE IF NOT EXISTS FileVersion (
         VersionID   INTEGER PRIMARY KEY	NOT NULL,
         FileID 	    INTEGER 			NOT NULL,
         VersionNum 	INTEGER 			NOT NULL,
@@ -46,15 +56,18 @@ const (
         FileHash	TEXT				NOT NULL
     );`
 
-	createFileChunksTable = `CREATE TABLE FileChunks (
+	createFileChunksTable = `CREATE TABLE IF NOT EXISTS FileChunks (
         ChunkID     INTEGER PRIMARY KEY	NOT NULL,
         FileID 		INTEGER             NOT NULL,
         VersionID   INTEGER             NOT NULL,
         ChunkNum	INTEGER 			NOT NULL,
         ChunkHash	TEXT				NOT NULL,
         Chunk		BLOB				NOT NULL
-    );`
-
+	);`
+	
+	getAppDBVersion = `SELECT DBVersion FROM AppData;`
+	setAppDBVersion = `INSERT OR REPLACE INTO AppData (DBVersion) VALUES (?);`
+	
 	lookupUserByName  = `SELECT Name FROM Users WHERE Name = ?;`
 	addUser           = `INSERT INTO Users (Name, Salt, Password) VALUES (?, ?, ?);`
 	getUser           = `SELECT UserID, Salt, Password, CryptoHash FROM Users  WHERE Name = ?;`
@@ -192,7 +205,12 @@ func (s *Storage) Close() {
 // CreateTables will create the tables needed in the database if they
 // don't already exist. If the tables already exist an error will be returned.
 func (s *Storage) CreateTables() error {
-	_, err := s.db.Exec(createUsersTable)
+	_, err := s.db.Exec(createAppDataTable)
+	if err != nil {
+		return fmt.Errorf("failed to create the APPDATA table: %v", err)
+	}
+
+	_, err = s.db.Exec(createUsersTable)
 	if err != nil {
 		return fmt.Errorf("failed to create the USERS table: %v", err)
 	}
@@ -217,7 +235,31 @@ func (s *Storage) CreateTables() error {
 		return fmt.Errorf("failed to create the FILECHUNKS table: %v", err)
 	}
 
+	// do some initialization if necessary
+	// TODO: Update database tables if there's a version bump.
+	var dbVersion int
+	err = s.db.QueryRow(getAppDBVersion).Scan(&dbVersion)
+	if err == sql.ErrNoRows {
+		_, err = s.db.Exec(setAppDBVersion, CurrentDBVersion)
+		if err != nil {
+			return fmt.Errorf("failed to set an initial DBVersion in the AppData table: %v", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("failed to get the DBVersion from the AppData table: %v", err)
+	}
+
 	return nil
+}
+
+// GetDBVersion will return the DB Version number for the opened database.
+func (s *Storage) GetDBVersion() (int, error) {
+	var dbVersion int
+	err := s.db.QueryRow(getAppDBVersion).Scan(&dbVersion)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get the DBVersion from the AppData table: %v", err)
+	
+	}
+	return dbVersion, nil
 }
 
 // IsUsernameFree will return true if there is not already a username with the
