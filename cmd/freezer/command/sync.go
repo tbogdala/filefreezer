@@ -19,10 +19,11 @@ import (
 // SyncStatus enumeration used to indicate the findings of the SyncFile and
 // SyncDirectory functions.
 const (
-	SyncStatusMissing     = 1 // chunks missing
-	SyncStatusLocalNewer  = 2 // local file newer
-	SyncStatusRemoteNewer = 3 // remote file newer
-	SyncStatusSame        = 4 // local and remote files are the same
+	SyncStatusMissing             = 1 // chunks missing
+	SyncStatusLocalNewer          = 2 // local file newer
+	SyncStatusRemoteNewer         = 3 // remote file newer
+	SyncStatusSame                = 4 // local and remote files are the same
+	SyncStatusUnsupportedFileType = 5 // returned when sync encouters device files or socket files, etc...
 )
 
 const (
@@ -148,6 +149,20 @@ func (s *State) SyncDirectory(localDir string, remoteDir string) (changeCount in
 // the local or remote version were considered newer. The number of chunks changes is also returned and
 // a non-nil error value is returned on error.
 func (s *State) SyncFile(localFilename string, remoteFilepath string, versionNum int) (status int, changeCount int, e error) {
+	// make sure that we're not attempting to sync a symlink, device, named pipe or socket
+	localFileStat, localFileStatErr := os.Stat(localFilename)
+	if localFileStatErr == nil {
+		// only check local files that exist
+		localMode := localFileStat.Mode()
+		if (localMode&os.ModeCharDevice) != 0 ||
+			(localMode&os.ModeDevice) != 0 ||
+			(localMode&os.ModeNamedPipe) != 0 ||
+			(localMode&os.ModeSocket) != 0 ||
+			(localMode&os.ModeSymlink) != 0 {
+			return SyncStatusUnsupportedFileType, 0, nil
+		}
+	}
+
 	// get the file information for the filename, which provides
 	// all of the information necessary to determine what to sync.
 	remote, err := s.GetFileInfoByFilename(remoteFilepath)
@@ -191,7 +206,7 @@ func (s *State) SyncFile(localFilename string, remoteFilepath string, versionNum
 		syncVersion = &remote.CurrentVersion
 	}
 
-	if _, err := os.Stat(localFilename); os.IsNotExist(err) {
+	if os.IsNotExist(localFileStatErr) {
 		// if it is a local file that doesn't exist then download the file from the
 		// server if it is registered there.
 		if !remote.IsDir {

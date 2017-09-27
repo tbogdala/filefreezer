@@ -24,9 +24,9 @@ import (
 // User kingpin to define a set of commands and flags for the application.
 var (
 	appFlags         = kingpin.New("freezer", "A command-line interface to filefreezer able to act as client or server.")
-	flagDatabasePath = appFlags.Flag("db", "The database path.").Default("file:freezer.db").String()
-	flagTLSKey       = appFlags.Flag("tlskey", "The HTTPS TLS private key file.").String()
-	flagTLSCrt       = appFlags.Flag("tlscert", "The HTTPS TLS public crt file.").String()
+	flagDatabasePath = appFlags.Flag("db", "The database path to use for storing all of the data.").Default("file:freezer.db").String()
+	flagTLSKey       = appFlags.Flag("tlskey", "The HTTPS TLS private key file to be used by the server.").String()
+	flagTLSCrt       = appFlags.Flag("tlscert", "The HTTPS TLS public crt file to be used by the server.").String()
 	flagExtraStrict  = appFlags.Flag("xs", "File checking should be extra strict on file sync comparisons.").Default("true").Bool()
 	flagUserName     = appFlags.Flag("user", "The username for user.").Short('u').String()
 	flagUserPass     = appFlags.Flag("pass", "The password for user.").Short('p').String()
@@ -35,34 +35,41 @@ var (
 	flagCPUProfile   = appFlags.Flag("cpuprofile", "Turns on cpu profiling and stores the result in the file specified by this flag.").String()
 	flagQuiet        = appFlags.Flag("quiet", "Turns off non-fatal error console output for the command.").Bool()
 
+	// Server commands
 	cmdServe           = appFlags.Command("serve", "Adds a new user to the storage.")
 	argServeListenAddr = cmdServe.Arg("http", "The net address to listen to").Default(":8080").String()
 	flagServeChunkSize = cmdServe.Flag("cs", "The number of bytes contained in one chunk.").Default("4194304").Int64() // 4 MB
 
-	cmdAddUser       = appFlags.Command("adduser", "Adds a new user to the storage.")
-	flagAddUserQuota = cmdAddUser.Flag("newquota", "The quota size in bytes.").Short('q').Default("1000000000").Int()
+	// User sub-commands
+	cmdUser = appFlags.Command("user", "User management command.")
 
-	cmdRmUser = appFlags.Command("rmuser", "Removes a user from the storage.")
+	cmdUserAdd       = cmdUser.Command("add", "Adds a new user to the storage.")
+	flagUserAddQuota = cmdUserAdd.Flag("quota", "The quota size in bytes.").Short('q').Default("1000000000").Int()
 
-	cmdModUser          = appFlags.Command("moduser", "Modifies a user in storage.")
-	flagModUserNewQuota = cmdModUser.Flag("newquota", "New quota size in bytes.").Short('Q').Int()
-	flagModUserNewName  = cmdModUser.Flag("newuser", "New quota size in bytes.").Short('U').String()
-	flagModUserNewPass  = cmdModUser.Flag("newpass", "New quota size in bytes.").Short('P').String()
+	cmdUserRm = cmdUser.Command("rm", "Removes a user from the storage system and purges their data.")
 
-	cmdUserStats = appFlags.Command("userstats", "Gets the quota, allocation and revision counts for the user.")
+	cmdUserMod       = cmdUser.Command("mod", "Modifies a user in storage.")
+	flagUserModQuota = cmdUserMod.Flag("quota", "New quota size in bytes.").Int()
+	flagUserModName  = cmdUserMod.Flag("name", "New username for the user being modified.").String()
+	flagUserModPass  = cmdUserMod.Flag("password", "New quota size in bytes.").String()
 
-	cmdGetFiles = appFlags.Command("getfiles", "Gets all files for a user in storage.")
+	cmdUserStats = cmdUser.Command("stats", "Displays the quota, allocation and revision counts for the user.")
 
-	cmdCrypto           = appFlags.Command("crypto", "Cryptography configuration and operation.")
-	cmdCryptoSetPass    = cmdCrypto.Command("setpass", "Sets the cryptography password to use for files being synced.")
-	flagCryptoSetPassPW = cmdCryptoSetPass.Arg("newpass", "New cryptography password.").String()
+	cmdUserCryptoPass    = cmdUser.Command("cryptopass", "Sets the cryptography password for the client.")
+	flagUserCryptoPassPW = cmdUserCryptoPass.Arg("pasword", "New cryptography password.").String()
 
-	cmdGetFileVersions       = appFlags.Command("versions", "Gets all file versions for a given file in storage.")
-	argGetFileVersionsTarget = cmdGetFileVersions.Arg("target", "The file path to on the server to get version information for.").String()
+	// File sub-commands
+	cmdFile = appFlags.Command("file", "Basic file management command.")
 
-	cmdRmFile     = appFlags.Command("rmfile", "Remove a file from storage.")
-	argRmFilePath = cmdRmFile.Arg("filename", "The file to remove on the server.").Required().String()
+	cmdFileList = cmdFile.Command("ls", "Lists all files for a user in storage.")
 
+	cmdFileListVersions       = cmdFile.Command("versions", "Gets all file versions for a given file in storage.")
+	argFileListVersionsTarget = cmdFileListVersions.Arg("target", "The file path to on the server to get version information for.").String()
+
+	cmdFileRm     = cmdFile.Command("rm", "Remove a file from storage.")
+	argFileRmPath = cmdFileRm.Arg("filename", "The file to remove on the server.").Required().String()
+
+	// Sync commands
 	cmdSync         = appFlags.Command("sync", "Synchronizes a path with the server.")
 	flagSyncVersion = cmdSync.Flag("version", "Specifies a version number to sync instead of the current version").Int()
 	argSyncPath     = cmdSync.Arg("filepath", "The file to sync with the server.").Required().String()
@@ -303,16 +310,16 @@ func main() {
 			}
 		}
 
-	case cmdAddUser.FullCommand():
+	case cmdUserAdd.FullCommand():
 		store, err := openStorage()
 		if err != nil {
 			log.Fatalf("Failed to open the storage database: %v", err)
 		}
 		username := interactiveGetLoginUser()
 		password := interactiveGetLoginPassword()
-		cmdState.AddUser(store, username, password, *flagAddUserQuota)
+		cmdState.AddUser(store, username, password, *flagUserAddQuota)
 
-	case cmdRmUser.FullCommand():
+	case cmdUserRm.FullCommand():
 		store, err := openStorage()
 		if err != nil {
 			log.Fatalf("Failed to open the storage database: %v", err)
@@ -320,21 +327,21 @@ func main() {
 		username := interactiveGetLoginUser()
 		cmdState.RmUser(store, username)
 
-	case cmdModUser.FullCommand():
+	case cmdUserMod.FullCommand():
 		store, err := openStorage()
 		if err != nil {
 			log.Fatalf("Failed to open the storage database: %v", err)
 		}
 		username := interactiveGetLoginUser()
-		cmdState.ModUser(store, username, *flagModUserNewQuota, *flagModUserNewName, *flagModUserNewPass)
+		cmdState.ModUser(store, username, *flagUserModQuota, *flagUserModName, *flagUserModPass)
 
-	case cmdCryptoSetPass.FullCommand():
+	case cmdUserCryptoPass.FullCommand():
 		username := interactiveGetLoginUser()
 		password := interactiveGetLoginPassword()
 		host := interactiveGetHost()
 
-		if *flagCryptoSetPassPW == "" {
-			*flagCryptoSetPassPW = interactiveGetCryptoPassword()
+		if *flagUserCryptoPassPW == "" {
+			*flagUserCryptoPassPW = interactiveGetCryptoPassword()
 		}
 
 		err := cmdState.Authenticate(host, username, password)
@@ -342,9 +349,9 @@ func main() {
 			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
 		}
 
-		cmdState.SetCryptoHashForPassword(*flagCryptoSetPassPW)
+		cmdState.SetCryptoHashForPassword(*flagUserCryptoPassPW)
 
-	case cmdGetFiles.FullCommand():
+	case cmdFileList.FullCommand():
 		username := interactiveGetLoginUser()
 		password := interactiveGetLoginPassword()
 		host := interactiveGetHost()
@@ -388,7 +395,7 @@ func main() {
 			logPrintln(builder.String())
 		}
 
-	case cmdGetFileVersions.FullCommand():
+	case cmdFileListVersions.FullCommand():
 		username := interactiveGetLoginUser()
 		password := interactiveGetLoginPassword()
 		host := interactiveGetHost()
@@ -403,22 +410,22 @@ func main() {
 			log.Fatalf("Failed to initialize cryptography: %v", err)
 		}
 
-		versions, err := cmdState.GetFileVersions(*argGetFileVersionsTarget)
+		versions, err := cmdState.GetFileVersions(*argFileListVersionsTarget)
 		if err != nil {
 			log.Fatalf("Failed to get the file versions for the user %s from the storage server %s: %v", username, host, err)
 		}
 
-		cmdState.Printf("Registered versions for %s:\n", *argGetFileVersionsTarget)
-		cmdState.Println(strings.Repeat("=", 25+len(*argGetFileVersionsTarget)))
-	
+		cmdState.Printf("Registered versions for %s:\n", *argFileListVersionsTarget)
+		cmdState.Println(strings.Repeat("=", 25+len(*argFileListVersionsTarget)))
+
 		// loop through all of the results and print them
 		for _, version := range versions {
 			modTime := time.Unix(version.LastMod, 0)
-			cmdState.Printf("Version ID: %d\t\tNumber: %d\t\tLastMod: %s", 
+			cmdState.Printf("Version ID: %d\t\tNumber: %d\t\tLastMod: %s",
 				version.VersionID, version.VersionNumber, modTime.Format(time.UnixDate))
 		}
 
-	case cmdRmFile.FullCommand():
+	case cmdFileRm.FullCommand():
 		username := interactiveGetLoginUser()
 		password := interactiveGetLoginPassword()
 		host := interactiveGetHost()
@@ -433,7 +440,7 @@ func main() {
 			log.Fatalf("Failed to initialize cryptography: %v", err)
 		}
 
-		filepath := *argRmFilePath
+		filepath := *argFileRmPath
 		err = cmdState.RmFile(filepath)
 		if err != nil {
 			log.Fatalf("Failed to remove file from the server %s: %v", host, err)

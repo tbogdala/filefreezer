@@ -106,7 +106,7 @@ func handleUsersLogin(state *serverState) echo.HandlerFunc {
 			user.Name,
 			user.ID,
 			jwt.StandardClaims{
-				ExpiresAt: time.Now().Add(time.Hour).Unix(),
+				ExpiresAt: time.Now().Add(time.Minute * 15).Unix(),
 			},
 		}
 
@@ -257,7 +257,7 @@ func handleGetAllFileVersion(state *serverState) echo.HandlerFunc {
 		}
 
 		return c.JSON(http.StatusOK, &models.FileGetAllVersionsResponse{
-			Versions:     versions,
+			Versions: versions,
 		})
 	}
 }
