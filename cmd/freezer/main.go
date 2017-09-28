@@ -80,22 +80,6 @@ var (
 	argSyncDirTarget = cmdSyncDir.Arg("target", "The directory path to sync to on the server; defaults to the same as the filename arg.").Default("").String()
 )
 
-func logPrintln(v ...interface{}) {
-	if *flagQuiet {
-		return
-	}
-
-	log.Println(v...)
-}
-
-func logPrintf(format string, v ...interface{}) {
-	if *flagQuiet {
-		return
-	}
-
-	log.Printf(format, v...)
-}
-
 func fmtPrintln(v ...interface{}) {
 	if *flagQuiet {
 		return
@@ -114,7 +98,7 @@ func fmtPrintf(format string, v ...interface{}) {
 
 // openStorage is the common function used to open the filefreezer Storage
 func openStorage() (*filefreezer.Storage, error) {
-	logPrintf("Opening database: %s\n", *flagDatabasePath)
+	fmtPrintf("Opening database: %s\n", *flagDatabasePath)
 
 	// open up the storage database
 	store, err := filefreezer.NewStorage(*flagDatabasePath)
@@ -371,10 +355,10 @@ func main() {
 			log.Fatalf("Failed to get all of the files for the user %s from the storage server %s: %v", username, host, err)
 		}
 
-		logPrintf("Registered files for %s:\n", username)
-		logPrintln(strings.Repeat("=", 22+len(username)))
-		logPrintln("FileID   | VerNum   | Flags    | Filename")
-		logPrintln(strings.Repeat("-", 41))
+		fmtPrintf("Registered files for %s:\n", username)
+		fmtPrintln(strings.Repeat("=", 22+len(username)))
+		fmtPrintln("FileID   | VerNum   | Flags    | Filename")
+		fmtPrintln(strings.Repeat("-", 41))
 
 		var builder bytes.Buffer
 		for _, fi := range allFiles {
@@ -388,11 +372,11 @@ func main() {
 
 			decryptedFilename, err := cmdState.DecryptString(fi.FileName)
 			if err != nil {
-				logPrintf("Failed to decrypt filename for file id %d: %v", fi.FileID, err)
+				fmtPrintf("Failed to decrypt filename for file id %d: %v", fi.FileID, err)
 			}
 
 			builder.WriteString(fmt.Sprintf("%s", decryptedFilename))
-			logPrintln(builder.String())
+			fmtPrintln(builder.String())
 		}
 
 	case cmdFileListVersions.FullCommand():

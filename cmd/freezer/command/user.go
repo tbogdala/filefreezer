@@ -160,6 +160,6 @@ func (s *State) SetCryptoHashForPassword(cryptoPassword string) error {
 	}
 
 	s.CryptoHash = putReq.CryptoHash
-	s.Printf("Hash of cryptography password updated successfully.")
+	s.Println("Hash of cryptography password updated successfully.")
 	return nil
 }

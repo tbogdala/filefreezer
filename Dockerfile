@@ -24,10 +24,10 @@ CMD ["--db=file:/data/freezer.db", "serve", ":8080"]
 ENTRYPOINT ["/go/bin/freezer"]
 
 # before running the filefreezer server, users need to be created in the database.
-# this can be done by overriding the default parameters to run the adduser command:
+# this can be done by overriding the default parameters to run the `user add` command:
 #
 # sudo docker run --rm -v /home/timothy/testdata:/data \
-#                 -p 127.0.0.1:8040:8080 filefreezer:latest -u admin -p 1234 adduser
+#                 -p 127.0.0.1:8040:8080 filefreezer:latest user add -u admin -p 1234
 
 
 # after the users have been added, the server can be run in a container with a 

@@ -4,7 +4,7 @@
 package command
 
 import (
-	"log"
+	"fmt"
 
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
 )
@@ -29,11 +29,11 @@ type State struct {
 	ServerCapabilities models.ServerCapabilities
 
 	// an overridable Println implementation that defaults to using
-	// the log package version from the stdlib.
+	// the fmt package version from the stdlib.
 	Println func(v ...interface{})
 
 	// an overridable Printf implementation that defaults to using
-	// the log package version from the stdlib.
+	// the fmt package version from the stdlib.
 	Printf func(format string, v ...interface{})
 
 	// the HTTPS TLS public crt file
@@ -54,11 +54,11 @@ func NewState() *State {
 }
 
 func defaultPrintln(v ...interface{}) {
-	log.Println(v...)
+	fmt.Println(v...)
 }
 
 func defaultPrintf(format string, v ...interface{}) {
-	log.Printf(format, v...)
+	fmt.Printf(format, v...)
 }
 
 // SetQuiet will alter the Printf and Println functions to either

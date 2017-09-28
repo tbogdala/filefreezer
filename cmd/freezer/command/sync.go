@@ -221,7 +221,7 @@ func (s *State) SyncFile(localFilename string, remoteFilepath string, versionNum
 			return SyncStatusRemoteNewer, 0, err
 		}
 
-		s.Printf("%s <== directory created", remoteFilepath)
+		s.Printf("%s <== directory created\n", remoteFilepath)
 		return SyncStatusRemoteNewer, 0, nil
 	}
 
@@ -305,7 +305,7 @@ func (s *State) SyncFile(localFilename string, remoteFilepath string, versionNum
 
 		// after whole-file hashs and all chunk hashs match, we can feel safe in saying they're not different
 		if !different {
-			s.Printf("%s --- unchanged", remoteFilepath)
+			s.Printf("%s --- unchanged\n", remoteFilepath)
 			return SyncStatusSame, 0, nil
 		}
 	}
@@ -375,7 +375,7 @@ func (s *State) syncUploadMissing(remoteID int, remoteVersionID int, filename st
 			return false, fmt.Errorf("Failed to upload the chunk to the server: %v", err)
 		}
 
-		s.Printf("%s +++ %d / %d", remoteFilepath, i+1, localChunkCount)
+		s.Printf("%s +++ %d / %d\n", remoteFilepath, i+1, localChunkCount)
 		uploadCount++
 
 		return true, nil
@@ -439,7 +439,7 @@ func (s *State) syncUploadNewer(remoteFileID int, filename string, remoteFilepat
 			return false, fmt.Errorf("Failed to upload the chunk to the server: %v", err)
 		}
 
-		s.Printf("%s >>> %d / %d", remoteFilepath, i+1, localChunkCount)
+		s.Printf("%s >>> %d / %d\n", remoteFilepath, i+1, localChunkCount)
 		uploadCount++
 
 		return true, nil
@@ -482,7 +482,7 @@ func (s *State) syncUploadNew(filename string, remoteFilepath string, isDir bool
 	// if we're uploading a new directory, stop here because there are no
 	// chunks to sync.
 	if isDir == true {
-		s.Printf("%s ==> directory created", remoteFilepath)
+		s.Printf("%s ==> directory created\n", remoteFilepath)
 		return 0, nil
 	}
 
@@ -522,7 +522,7 @@ func (s *State) syncUploadNew(filename string, remoteFilepath string, isDir bool
 			return false, fmt.Errorf("Failed to upload the chunk to the server: %v", err)
 		}
 
-		s.Printf("%s >>> %d / %d", remoteFilepath, i+1, localChunkCount)
+		s.Printf("%s >>> %d / %d\n", remoteFilepath, i+1, localChunkCount)
 		uploadCount++
 
 		return true, nil
@@ -531,7 +531,7 @@ func (s *State) syncUploadNew(filename string, remoteFilepath string, isDir bool
 		return uploadCount, fmt.Errorf("Failed to upload the local file chunk for %s: %v", filename, err)
 	}
 
-	s.Printf("%s ==> uploaded", remoteFilepath)
+	s.Printf("%s ==> uploaded\n", remoteFilepath)
 	return uploadCount, nil
 }
 
@@ -563,10 +563,10 @@ func (s *State) syncDownload(remoteID int, remoteVersionID int, filename string,
 			return chunksWritten, fmt.Errorf("Failed to write to the #%d chunk to the local file %s: %v", i, filename, err)
 		}
 
-		s.Printf("%s <<< %d / %d", remoteFilepath, i+1, chunkCount)
+		s.Printf("%s <<< %d / %d\n", remoteFilepath, i+1, chunkCount)
 		chunksWritten++
 	}
 
-	s.Printf("%s <== downloaded", remoteFilepath)
+	s.Printf("%s <== downloaded\n", remoteFilepath)
 	return chunksWritten, nil
 }

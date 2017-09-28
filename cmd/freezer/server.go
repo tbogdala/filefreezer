@@ -57,11 +57,11 @@ func newState() (*serverState, error) {
 		if err != nil {
 			return nil, fmt.Errorf("A crypto passrandomPassphraseword was not supplied and random generation failed: %v", err)
 		}
-		logPrintln("JWT random passphrase generated.")
+		fmtPrintln("JWT random passphrase generated.")
 	}
 	s.JWTSecretBytes = randomPassphrase
 
-	logPrintf("Database opened: %s\n", s.DatabasePath)
+	fmtPrintf("Database opened: %s\n", s.DatabasePath)
 	return s, nil
 }
 
@@ -84,7 +84,7 @@ func (state *serverState) serve(readyCh chan bool) (quitCh chan bool) {
 		<-stop
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		logPrintln("Shutting down server...")
+		fmtPrintln("Shutting down server...")
 		if err := e.Shutdown(ctx); err != nil {
 			log.Fatalf("could not shutdown: %v", err)
 		}
@@ -96,14 +96,14 @@ func (state *serverState) serve(readyCh chan bool) (quitCh chan bool) {
 	// create the HTTP server
 	go func() {
 		if len(*flagTLSCrt) < 1 || len(*flagTLSKey) < 1 {
-			logPrintf("Starting http server on %s ...", *argServeListenAddr)
+			fmtPrintf("Starting http server on %s ...", *argServeListenAddr)
 			if err := e.Start(*argServeListenAddr); err != nil {
-				logPrintln("Shutting down the server ...")
+				fmtPrintln("Shutting down the server ...")
 			}
 		} else {
-			logPrintf("Starting https server on %s ...", *argServeListenAddr)
+			fmtPrintf("Starting https server on %s ...", *argServeListenAddr)
 			if err := e.StartTLS(*argServeListenAddr, *flagTLSCrt, *flagTLSKey); err != nil {
-				logPrintln("Shutting down the server ...")
+				fmtPrintln("Shutting down the server ...")
 			}
 		}
 	}()
