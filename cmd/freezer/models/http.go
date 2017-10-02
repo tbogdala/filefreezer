@@ -69,7 +69,20 @@ type NewFileVersionResponse struct {
 // FileGetAllVersionsResponse is the  JSON serializable response given by the
 // /api/file/{fileid}/versions GET handler.
 type FileGetAllVersionsResponse struct {
-	Versions     []filefreezer.FileVersionInfo
+	Versions []filefreezer.FileVersionInfo
+}
+
+// FileDeleteVersionsRequest is the JSON serializable request object sent to the
+// /file/{fileid}/versions DELETE handlder.
+type FileDeleteVersionsRequest struct {
+	MinVersion int
+	MaxVersion int
+}
+
+// FileDeleteVersionsResponse is the JSON serializable response given by the
+// /file/{fileid}/versions DELETE handlder.
+type FileDeleteVersionsResponse struct {
+	Status bool
 }
 
 // FileGetByNameRequest is the JSON structure to be sent to the

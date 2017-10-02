@@ -64,6 +64,9 @@ func InitRoutes(state *serverState, e *echo.Echo) {
 	// handles registering a new file version for a given file id
 	restricted.GET("/file/:fileid/versions", handleGetAllFileVersion(state))
 
+	// handles registering a new file version for a given file id
+	restricted.DELETE("/file/:fileid/versions", handleDeleteFileVersions(state))
+
 	// deletes a file
 	restricted.DELETE("/file/:fileid", handleDeleteFile(state))
 
@@ -235,6 +238,29 @@ func handleNewFileVersion(state *serverState) echo.HandlerFunc {
 
 func handleGetAllFileVersion(state *serverState) echo.HandlerFunc {
 	return func(c echo.Context) error {
+		//jwtToken := c.Get(jwtContextName).(*jwt.Token)
+		//claims := jwtToken.Claims.(*jwtCustomClaims)
+
+		// pull the file id from the URI matched by the mux
+		fileID, err := strconv.ParseInt(c.Param("fileid"), 10, 64)
+		if err != nil {
+			return c.String(http.StatusBadRequest, "A valid integer was not used for the file id in the URI.")
+		}
+
+		// get all the versions associated with the file in storage
+		versions, err := state.Storage.GetFileVersions(int(fileID))
+		if err != nil {
+			return c.String(http.StatusNotFound, "Failed to get file versions for the user.")
+		}
+
+		return c.JSON(http.StatusOK, &models.FileGetAllVersionsResponse{
+			Versions: versions,
+		})
+	}
+}
+
+func handleDeleteFileVersions(state *serverState) echo.HandlerFunc {
+	return func(c echo.Context) error {
 		jwtToken := c.Get(jwtContextName).(*jwt.Token)
 		claims := jwtToken.Claims.(*jwtCustomClaims)
 
@@ -244,20 +270,20 @@ func handleGetAllFileVersion(state *serverState) echo.HandlerFunc {
 			return c.String(http.StatusBadRequest, "A valid integer was not used for the file id in the URI.")
 		}
 
-		// pull down the fileinfo object for a file ID
-		fi, err := state.Storage.GetFileInfo(claims.UserID, int(fileID))
+		// deserialize the JSON object that should be in the request body
+		var req models.FileDeleteVersionsRequest
+		err = c.Bind(&req)
 		if err != nil {
-			return c.String(http.StatusNotFound, "Failed to get file for the user.")
+			return c.String(http.StatusBadRequest, "Failed to read the request body: "+err.Error())
 		}
 
-		// get all the versions associated with the file in storage
-		versions, err := state.Storage.GetFileVersions(fi.FileID)
+		err = state.Storage.RemoveFileVersions(claims.UserID, int(fileID), req.MinVersion, req.MaxVersion)
 		if err != nil {
-			return c.String(http.StatusNotFound, "Failed to get file versions for the user.")
+			return c.String(http.StatusBadRequest, "Failed to remove file versions for the file.")
 		}
 
-		return c.JSON(http.StatusOK, &models.FileGetAllVersionsResponse{
-			Versions: versions,
+		return c.JSON(http.StatusOK, &models.FileDeleteVersionsResponse{
+			Status: true,
 		})
 	}
 }

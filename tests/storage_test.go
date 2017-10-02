@@ -911,6 +911,106 @@ func TestFileVersioning(t *testing.T) {
 	}
 }
 
+func TestVersionRemoval(t *testing.T) {
+	// create an in memory storage
+	store, err := filefreezer.NewStorage("file::memory:?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatalf("Failed to create the in-memory storage for testing. %v", err)
+	}
+	defer store.Close()
+
+	// setup the tables in test database
+	err = store.CreateTables()
+	if err != nil {
+		t.Fatalf("Failed to create tables for testing. %v", err)
+	}
+
+	// make sure the table was created with the current DB version number
+	dbVersion, err := store.GetDBVersion()
+	if err != nil || dbVersion != filefreezer.CurrentDBVersion {
+		t.Fatalf("Storage DB doesn't have current DB Version number set (got %d).", dbVersion)
+	}
+
+	///////////////////////////////////////////////////////////////////////////
+	// User registration
+	setupTestUser(store, "admin", "hamster", t)
+
+	// set the user's quota to something rediculously small
+	user, err := store.GetUser("admin")
+	if err != nil {
+		t.Fatalf("Failed to get the user: %v", err)
+	}
+
+	// get the inital stats. allocated count should be zero
+	userStats, err := store.GetUserStats(user.ID)
+	if err != nil {
+		t.Fatalf("Couldn't get user stats after uploading random file version: %v", err)
+	}
+	if userStats.Allocated != 0 {
+		t.Fatalf("User started off with a non-zero allocation count: %d", userStats.Allocated)
+	}
+
+	///////////////////////////////////////////////////////////////////////////
+	// Make some versions
+	testVersionCount := 5 // changing this will necessitate changes below
+	testChunkSize := 2
+	testFilename := "random_data.dat"
+	var fi *filefreezer.FileInfo
+	for i := 0; i < testVersionCount; i++ {
+		fi = addNewRandomFile(store, user, testFilename, testChunkSize, t)
+	}
+	defer os.Remove(testFilename)
+
+	// ensure we got the right allocation size
+	userStats, err = store.GetUserStats(user.ID)
+	if err != nil {
+		t.Fatalf("Couldn't get user stats after uploading random file version: %v", err)
+	}
+	if int64(userStats.Allocated) != store.ChunkSize*int64(testChunkSize)*int64(testVersionCount) {
+		t.Fatalf("User started off with a non-zero allocation count: %d", userStats.Allocated)
+	}
+	initialAllocation := userStats.Allocated
+
+	// try to delete first three versions
+	err = store.RemoveFileVersions(user.ID, fi.FileID, 1, 3)
+	if err != nil {
+		t.Fatalf("Couldn't remove the first three file versions: %v", err)
+	}
+
+	// make sure the allocation count adjusted properly
+	userStats, err = store.GetUserStats(user.ID)
+	if err != nil {
+		t.Fatalf("Couldn't get user stats after deleting random file versions: %v", err)
+	}
+	if int64(userStats.Allocated) != int64(initialAllocation)-(store.ChunkSize*int64(testChunkSize)*int64(3)) {
+		t.Fatalf("User started off with a non-zero allocation count: %d", userStats.Allocated)
+	}
+
+	// make sure there's only two versions left
+	versions, err := store.GetFileVersions(fi.FileID)
+	if err != nil {
+		t.Fatalf("Couldn't get the file versions after removing some: %v", err)
+	}
+
+	if len(versions) != 2 {
+		t.Fatalf("Expected only two versions remainging after removal but got %d", len(versions))
+	}
+
+	if versions[0].VersionNumber != 4 && versions[1].VersionNumber != 5 {
+		t.Fatal("Expected only the fourth and fith version of the test file to survive.")
+	}
+
+	// try to delete an out of bounds version to make sure it returns an error
+	err = store.RemoveFileVersions(user.ID, fi.FileID, 100, 300)
+	if err == nil {
+		t.Fatal("Expected an error for attempting to remove out of bounds file versions")
+	}
+	err = store.RemoveFileVersions(user.ID, fi.FileID, -300, -10)
+	if err == nil {
+		t.Fatal("Expected an error for attempting to remove out of bounds file versions")
+	}
+}
+
 // split the testing process of adding a user into a separate functions so that
 // it's easier to add multiple users.
 func setupTestUser(store *filefreezer.Storage, username string, password string, t *testing.T) {
@@ -1074,4 +1174,47 @@ func addMissingFileChunks(store *filefreezer.Storage, fi *filefreezer.FileInfo) 
 	}
 
 	return nil
+}
+
+func addNewRandomFile(store *filefreezer.Storage, user *filefreezer.User, filename string,
+	chunkCount int, t *testing.T) *filefreezer.FileInfo {
+	existingFI, err := store.GetFileInfoByName(user.ID, filename)
+	if err != nil {
+		existingFI = nil // ignore the error and say a previous version didn't ext
+	}
+
+	rando1 := genRandomBytes(int(store.ChunkSize) * chunkCount)
+	ioutil.WriteFile(filename, rando1, os.ModePerm)
+	fileStats, err := filefreezer.CalcFileHashInfo(store.ChunkSize, filename)
+	if err != nil {
+		t.Fatalf("Failed to calculate the file hash for %s: %v", filename, err)
+	}
+
+	// register a new version of the file in storage with the updated local information
+	var fi *filefreezer.FileInfo
+	if existingFI != nil {
+		fi, err = store.TagNewFileVersion(user.ID, existingFI.FileID, fileStats.Permissions,
+			fileStats.LastMod, fileStats.ChunkCount, fileStats.HashString)
+		if err != nil {
+			t.Fatalf("Failed to tag a new file version for %s: %v", filename, err)
+		}
+		if fi.FileID != existingFI.FileID {
+			t.Fatalf("File ID changed between version tagging from %d to %d.", existingFI.FileID, fi.FileID)
+		}
+	} else {
+		// add the file information to the storage server
+		fi, err = store.AddFileInfo(user.ID, filename, fileStats.IsDir, fileStats.Permissions,
+			fileStats.LastMod, fileStats.ChunkCount, fileStats.HashString)
+		if err != nil {
+			t.Fatalf("Failed to add a new file (%s): %v", filename, err)
+		}
+	}
+
+	// upload the version of the file
+	err = addMissingFileChunks(store, fi)
+	if err != nil {
+		t.Fatalf("An error was received after uploading chunks of the random test file: %v", err)
+	}
+
+	return fi
 }

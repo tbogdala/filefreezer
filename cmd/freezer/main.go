@@ -63,11 +63,19 @@ var (
 
 	cmdFileList = cmdFile.Command("ls", "Lists all files for a user in storage.")
 
-	cmdFileListVersions       = cmdFile.Command("versions", "Gets all file versions for a given file in storage.")
-	argFileListVersionsTarget = cmdFileListVersions.Arg("target", "The file path to on the server to get version information for.").String()
-
 	cmdFileRm     = cmdFile.Command("rm", "Remove a file from storage.")
 	argFileRmPath = cmdFileRm.Arg("filename", "The file to remove on the server.").Required().String()
+
+	// Version sub-commands
+	cmdVersions = appFlags.Command("versions", "Version management command.")
+
+	cmdVersionsList       = cmdVersions.Command("ls", "Lists all versions for a file in storage.")
+	argVersionsListTarget = cmdVersionsList.Arg("target", "The file path to on the server to get version information for.").String()
+
+	cmdVersionsRm       = cmdVersions.Command("rm", "Remove a file from storage.")
+	argVersionsRmMin    = cmdVersionsRm.Arg("minversion", "The minimum version number to remove.").Required().Int()
+	argVersionsRmMax    = cmdVersionsRm.Arg("maxversion", "The maximum version number to remove.").Required().Int()
+	argVersionsRmTarget = cmdVersionsRm.Arg("target", "The file to remove on the server.").Required().String()
 
 	// Sync commands
 	cmdSync         = appFlags.Command("sync", "Synchronizes a path with the server.")
@@ -183,6 +191,10 @@ func initCrypto(cmdState *command.State) error {
 }
 
 func interactiveFirstTimeSetCryptoPassword() string {
+	if *flagCryptoPass != "" {
+		return *flagCryptoPass
+	}
+
 	reader := bufio.NewReader(os.Stdin)
 	fmtPrintln("The cryptography password has not been set for this account.")
 	fmtPrintln("Filefreezer will encrypt all data before sending it to the server, but")
@@ -379,7 +391,7 @@ func main() {
 			fmtPrintln(builder.String())
 		}
 
-	case cmdFileListVersions.FullCommand():
+	case cmdVersionsList.FullCommand():
 		username := interactiveGetLoginUser()
 		password := interactiveGetLoginPassword()
 		host := interactiveGetHost()
@@ -394,19 +406,42 @@ func main() {
 			log.Fatalf("Failed to initialize cryptography: %v", err)
 		}
 
-		versions, err := cmdState.GetFileVersions(*argFileListVersionsTarget)
+		versions, err := cmdState.GetFileVersions(*argVersionsListTarget)
 		if err != nil {
 			log.Fatalf("Failed to get the file versions for the user %s from the storage server %s: %v", username, host, err)
 		}
 
-		cmdState.Printf("Registered versions for %s:\n", *argFileListVersionsTarget)
-		cmdState.Println(strings.Repeat("=", 25+len(*argFileListVersionsTarget)))
+		cmdState.Printf("Registered versions for %s:\n", *argVersionsListTarget)
+		cmdState.Println(strings.Repeat("=", 25+len(*argVersionsListTarget)))
 
 		// loop through all of the results and print them
 		for _, version := range versions {
 			modTime := time.Unix(version.LastMod, 0)
-			cmdState.Printf("Version ID: %d\t\tNumber: %d\t\tLastMod: %s",
+			cmdState.Printf("Version ID: %d\t\tNumber: %d\t\tLastMod: %s\n",
 				version.VersionID, version.VersionNumber, modTime.Format(time.UnixDate))
+		}
+
+	case cmdVersionsRm.FullCommand():
+		username := interactiveGetLoginUser()
+		password := interactiveGetLoginPassword()
+		host := interactiveGetHost()
+
+		err := cmdState.Authenticate(host, username, password)
+		if err != nil {
+			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
+		}
+
+		err = initCrypto(cmdState)
+		if err != nil {
+			log.Fatalf("Failed to initialize cryptography: %v", err)
+		}
+
+		// attempt to remove the file versions
+		err = cmdState.RmFileVersions(*argVersionsRmTarget, *argVersionsRmMin, *argVersionsRmMax)
+		if err != nil {
+			cmdState.Printf("Failed to remove the versions: %v\n", err)
+		} else {
+			cmdState.Printf("Successfully removed versions %d to %d.\n", *argVersionsRmMin, *argVersionsRmMax)
 		}
 
 	case cmdFileRm.FullCommand():

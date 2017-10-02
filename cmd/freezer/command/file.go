@@ -93,6 +93,34 @@ func (s *State) GetFileVersions(filename string) (versions []filefreezer.FileVer
 	return r.Versions, nil
 }
 
+// RmFileVersions removes a range of versions (inclusive) from minVersion to
+// maxVersion from storage. A non-nil error is returned on failure.
+func (s *State) RmFileVersions(filename string, minVersion int, maxVersion int) error {
+	fi, err := s.GetFileInfoByFilename(filename)
+	if err != nil {
+		return err
+	}
+
+	var putReq models.FileDeleteVersionsRequest
+	putReq.MinVersion = minVersion
+	putReq.MaxVersion = maxVersion
+
+	// get the file id for the filename provided
+	target := fmt.Sprintf("%s/api/file/%d/versions", s.HostURI, fi.FileID)
+	body, err := s.RunAuthRequest(target, "DELETE", s.AuthToken, putReq)
+	var r models.FileDeleteVersionsResponse
+	err = json.Unmarshal(body, &r)
+	if err != nil {
+		return fmt.Errorf("Failed to delete the file versions: %v", err)
+	}
+
+	if !r.Status {
+		return fmt.Errorf("an unknown error caused a failed status to be returned while deleting file versions")
+	}
+
+	return nil
+}
+
 // GetMissingChunksForFile will return a slice of chunk numbers (index starts at zero and
 // is local to the specific file) for a given file located by file ID. A non-nil
 // error is returned on error.

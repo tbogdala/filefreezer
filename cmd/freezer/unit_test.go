@@ -928,6 +928,25 @@ func TestFileVersioning(t *testing.T) {
 	if bytes.Compare(previousBytes, callbackBytes) != 0 {
 		t.Fatal("Differences were found in the local file with respect to previous version when they should have been the same")
 	}
+
+	// at this point we have five versions. attempt to delete the first three
+	err = cmdState.RmFileVersions(filename, 1, 3)
+	if err != nil {
+		t.Fatalf("Error while attempting to remove the first three versions of the test file: %v", err)
+	}
+
+	// verify that we only have two versions left
+	versions, err = cmdState.GetFileVersions(filename)
+	if err != nil {
+		t.Fatalf("Failed to get the file versions for the test file: %v", err)
+	}
+	if len(versions) != 2 {
+		t.Fatalf("Expected to get two file versions for the test file but received %d.", len(versions))
+	}
+	if versions[0].VersionNumber != 4 || versions[1].VersionNumber != 5 {
+		t.Fatalf("Expected to get file versions 4 and 5 for the test file but got %d and %d instead.",
+			versions[0].VersionNumber, versions[1].VersionNumber)
+	}
 }
 
 func removeAllFilesFromStorage(cmdState *command.State) error {

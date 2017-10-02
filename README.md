@@ -3,10 +3,14 @@ File Freezer
 
 A simple to deploy cloud file storage multi-user system; Licensed under the GPL v3.
 
+Have you ever wanted an easy to deploy server for backing up files and
+storing them encrypted on a remote machine? File Freezer does that! It 
+also keeps versions of the files that have been added to the server so that
+you can go back in the file history and pull up old versions of the files.
+
+
 Features
 --------
-
-**API AND DATABASE STILL ACTIVELY CHANGING!**
 
 * Zero-knowledge encryption of file data and file name; the server
   does not store the user's cryptography password and cannot decrypt
@@ -17,6 +21,10 @@ Features
 * Multi-user capability with quota restrictions
 
 * Simple data storage backend using Sqlite3
+
+* Public RESTful API that can be used by other clients
+
+**API AND DATABASE STABILITY NOT GUARANTEED!**
 
 
 Installation
@@ -160,7 +168,7 @@ You can get a list of stored versions on the server for a given file by
 running the following command:
 
 ```bash
-freezer -u admin -p 1234 -s secret -h localhost:8080 file versions hello.txt
+freezer -u admin -p 1234 -s secret -h localhost:8080 versions ls hello.txt
 ```
 
 If you wanted to syncronize the local file back to the first version of the
@@ -184,6 +192,33 @@ under a prefix of `serverbackup`. By using a prefix like this in the target of
 a `sync` or `syncdir` operation, you can logically organize different groups of files.
 
 
+Testing and Benchmarking
+------------------------
+
+This package ships with unit tests and benchmarks included. These are in separate
+locations to have the tests isolated to the main `filefreezer` package and then
+tests specific to the projects located in the `cmd` directory.
+
+Currently to run all of the tests you would execute the following in a shell:
+
+```bash
+cd $GOPATH/src/github.com/tbogdala/filefreezer/tests
+go test
+cd ../cmd/freezer
+go test
+```
+
+To run the benchmarks you can execute a similar set of commands which will
+only run the benchmarks and not the unit tests:
+
+```bash
+cd $GOPATH/src/github.com/tbogdala/filefreezer/tests
+go test -run=xxx -bench=.
+cd ../cmd/freezer
+go test -run=xxx -bench=.
+```
+
+
 Known Bugs and Limitations
 --------------------------
 
@@ -195,11 +230,11 @@ Known Bugs and Limitations
 
 * userid is taken on some Storage methods, but not all, for checking correct user is accessing data
 
-* cli command to purge some/all of stored file versions
-
 * starting a remote sync target name with '/' in win32/msys2 attempts to autocomplete
   the string as a path and not give the desired results. the fix is to use cmd.exe to 
   perform the command line execution to get the desired results.
+
+* cli to recursively remove files from storage
 
 
 TODO / Notes
@@ -207,11 +242,6 @@ TODO / Notes
 
 * Inspired from a blog post about Dropbox:
   https://blogs.dropbox.com/tech/2014/07/streaming-file-synchronization/
-
-* create users/password via CLI
-  * salt created on user password creation
-  * bcrypt2 (salt + pw hash) stored in database
-  * ref: https://crackstation.net/hashing-security.htm
 
 * flag: file hashing algo
 * flag: hash on start instead of just checking mod time
@@ -223,4 +253,11 @@ TODO / Notes
 
 * work on readability of error messages wrt bubbling up error objects
 
+* break up unit test functions into more modular test functions
+
 * multithreading the chunk uploading of files
+
+* review current code documentation for godoc purposes
+
+* something like a general db stats command to return total files,
+  chunks, versions per user/system

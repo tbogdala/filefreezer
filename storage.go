@@ -64,10 +64,10 @@ const (
         ChunkHash	TEXT				NOT NULL,
         Chunk		BLOB				NOT NULL
 	);`
-	
+
 	getAppDBVersion = `SELECT DBVersion FROM AppData;`
 	setAppDBVersion = `INSERT OR REPLACE INTO AppData (DBVersion) VALUES (?);`
-	
+
 	lookupUserByName  = `SELECT Name FROM Users WHERE Name = ?;`
 	addUser           = `INSERT INTO Users (Name, Salt, Password) VALUES (?, ?, ?);`
 	getUser           = `SELECT UserID, Salt, Password, CryptoHash FROM Users  WHERE Name = ?;`
@@ -88,10 +88,20 @@ const (
 	removeFileInfoByID    = `DELETE FROM FileInfo WHERE FileID = ?;`
 	setFileCurrentVersion = `UPDATE FileInfo SET CurrentVersionID = ? WHERE FileID = ?;`
 
-	addFileVersion         = `INSERT INTO FileVersion (FileID, VersionNum, Perms, LastMod, ChunkCount, FileHash) VALUES (?, ?, ?, ?, ?, ?);`
-	getFileVersionByID     = `SELECT VersionNum, Perms, LastMod, ChunkCount, FileHash FROM FileVersion WHERE VersionID = ?;`
-	removeFileVersionsByID = `DELETE FROM FileVersion WHERE FileID = ?;`
-	getVersionsForFile     = `SELECT VersionID, VersionNum, Perms, LastMod, ChunkCount, FileHash FROM FileVersion WHERE FileID = ?;`
+	addFileVersion                = `INSERT INTO FileVersion (FileID, VersionNum, Perms, LastMod, ChunkCount, FileHash) VALUES (?, ?, ?, ?, ?, ?);`
+	getFileVersionByID            = `SELECT VersionNum, Perms, LastMod, ChunkCount, FileHash FROM FileVersion WHERE VersionID = ?;`
+	removeAllFileVersionsByFileID = `DELETE FROM FileVersion WHERE FileID = ?;`
+	removeFileVersionsByFileID    = `DELETE FROM FileVersion WHERE FileID = ? AND (VersionNum BETWEEN ? AND ?);`
+	getVersionsForFile            = `SELECT VersionID, VersionNum, Perms, LastMod, ChunkCount, FileHash FROM FileVersion WHERE FileID = ?;`
+	getFileVersionsTotalChunkSize = `SELECT SUM(LENGTH(Chunk)) FROM FileChunks 
+					INNER JOIN FileVersion on FileChunks.VersionID = FileVersion.VersionID
+					WHERE FileChunks.FileID = ? AND (VersionNum BETWEEN ? AND ?);`
+	removeAllFileVersionChunks = `DELETE FROM FileChunks
+					WHERE ChunkID in (
+						SELECT ChunkID FROM FileChunks
+						INNER JOIN FileVersion on FileChunks.VersionID = FileVersion.VersionID
+						WHERE FileChunks.FileID = ? AND (VersionNum BETWEEN ? AND ?)
+					);`
 
 	getAllFileChunksByID  = `SELECT ChunkNum, ChunkHash FROM FileChunks WHERE FileID = ? AND VersionID = ?;`
 	addFileChunk          = `INSERT OR REPLACE INTO FileChunks (FileID, VersionID, ChunkNum, ChunkHash, Chunk) VALUES (?, ?, ?, ?, ?);`
@@ -257,7 +267,7 @@ func (s *Storage) GetDBVersion() (int, error) {
 	err := s.db.QueryRow(getAppDBVersion).Scan(&dbVersion)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get the DBVersion from the AppData table: %v", err)
-	
+
 	}
 	return dbVersion, nil
 }
@@ -474,6 +484,68 @@ func (s *Storage) GetUserStats(userID int) (*UserStats, error) {
 	return stats, nil
 }
 
+// RemoveFileVersions will remove any file versions of the file specified by fileID
+// that are between the minVersion and maxVersion (inclusive). A non-nil error
+// value is returned on failure.
+//
+// NOTE: supplying a minVersion and maxVersion that does not include any valid
+// file versions will end up returning an error.
+func (s *Storage) RemoveFileVersions(userID, fileID, minVersion, maxVersion int) error {
+	err := s.transact(func(tx *sql.Tx) error {
+		// check to make sure the user owns the file id
+		var owningUserID int
+		err := tx.QueryRow(getFileInfoOwner, fileID).Scan(&owningUserID)
+		if err != nil {
+			return fmt.Errorf("failed to get the owning user id for a given file: %v", err)
+		}
+		if owningUserID != userID {
+			return fmt.Errorf("user does not own the file id supplied")
+		}
+
+		// get the total chunk size used by the file versions
+		var totalChunkSize int
+		err = tx.QueryRow(getFileVersionsTotalChunkSize, fileID, minVersion, maxVersion).Scan(&totalChunkSize)
+		if err != nil {
+			return fmt.Errorf("failed to get the chunk sizes for a file in the database: %v", err)
+		}
+
+		// remove all of the file chunks used by the file versions
+		_, err = tx.Exec(removeAllFileVersionChunks, fileID, minVersion, maxVersion)
+		if err != nil {
+			return fmt.Errorf("failed to delete the file chunks associated with the file: %v", err)
+		}
+
+		// update the allocation counts
+		if totalChunkSize > 0 {
+			res, err := tx.Exec(updateUserStats, -totalChunkSize, userID)
+			if err != nil {
+				return fmt.Errorf("failed to update the allocated bytes in the database after removing chunks: %v", err)
+			}
+
+			// make sure one row was affected with the UPDATE statement
+			affected, err := res.RowsAffected()
+			if affected != 1 {
+				return fmt.Errorf("failed to update the user info in the database after removing chunks; no rows were affected")
+			} else if err != nil {
+				return fmt.Errorf("failed to update the user info in the database after removing chunks: %v", err)
+			}
+
+			// if no rows were affected, that just means there were no chunks that
+			// needed to be deleted, so no need to check the result.
+		}
+
+		// remove the file versions
+		_, err = tx.Exec(removeFileVersionsByFileID, fileID, minVersion, maxVersion)
+		if err != nil {
+			return fmt.Errorf("failed to remove the file versions in the database: %v", err)
+		}
+
+		return nil
+	})
+
+	return err
+}
+
 // RemoveFile removes a file listing and all of the associated chunks in storage.
 // Returns an error on failure
 func (s *Storage) RemoveFile(userID, fileID int) error {
@@ -495,7 +567,7 @@ func (s *Storage) RemoveFile(userID, fileID int) error {
 		}
 
 		// remove the file versions
-		_, err = tx.Exec(removeFileVersionsByID, fileID)
+		_, err = tx.Exec(removeAllFileVersionsByFileID, fileID)
 		if err != nil {
 			return fmt.Errorf("failed to remove the file versions in the database: %v", err)
 		}
@@ -771,7 +843,7 @@ func (s *Storage) GetFileInfoByName(userID int, filename string) (*FileInfo, err
 	return fi, nil
 }
 
-// GetFileVersions will return a slice of FileVersionInfo that encompases all of the 
+// GetFileVersions will return a slice of FileVersionInfo that encompases all of the
 // versions registered for a given file ID.
 func (s *Storage) GetFileVersions(fileID int) ([]FileVersionInfo, error) {
 	// pull the current version data
