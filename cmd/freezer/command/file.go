@@ -42,17 +42,20 @@ func (s *State) GetFileInfoByFilename(filename string) (foundFile filefreezer.Fi
 
 // RmFile takes the filename and attempts to find it in the list of filenames
 // registered on the storage server for the user. If it does find it, an
-// API method is called to delete the object. A non-nil error is returned on failure.
-func (s *State) RmFile(filename string) error {
+// API method is called to delete the object. If dryRun is set to true
+// the file removal command is never executed. A non-nil error is returned on failure.
+func (s *State) RmFile(filename string, dryRun bool) error {
 	fi, err := s.GetFileInfoByFilename(filename)
 	if err != nil {
 		return err
 	}
 
-	target := fmt.Sprintf("%s/api/file/%d", s.HostURI, fi.FileID)
-	_, err = s.RunAuthRequest(target, "DELETE", s.AuthToken, nil)
-	if err != nil {
-		return fmt.Errorf("Failed to remove the file %s: %v", filename, err)
+	if !dryRun {
+		target := fmt.Sprintf("%s/api/file/%d", s.HostURI, fi.FileID)
+		_, err = s.RunAuthRequest(target, "DELETE", s.AuthToken, nil)
+		if err != nil {
+			return fmt.Errorf("Failed to remove the file %s: %v", filename, err)
+		}
 	}
 
 	s.Printf("Removed file: %s\n", filename)

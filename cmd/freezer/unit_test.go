@@ -449,7 +449,7 @@ func TestEverything(t *testing.T) {
 	}
 
 	// remove the aliased file and make sure the allocation count decreases by the same amount
-	err = cmdState.RmFile(aliasedFilename)
+	err = cmdState.RmFile(aliasedFilename, false)
 	if err != nil {
 		t.Fatalf("Failed to remove the aliased file from the server: %v", err)
 	}

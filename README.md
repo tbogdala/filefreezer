@@ -158,10 +158,10 @@ Notice that the command takes the name of the file on the server and not
 the local file which was originally specified on the command line.
 
 If you wanted to remove a set of files controlled by a regular expression,
-you can use the `file rmrx` command like so:
+you can use the `--regex` flag like so:
 
 ```bash
-freezer -u admin -p 1234 -h localhost:8080 file rmrx --dryrun "h*"
+freezer -u admin -p 1234 -h localhost:8080 file rm --regex --dryrun "h*"
 ```
 
 The regular expression will likely have to be supplied in a quoted string to

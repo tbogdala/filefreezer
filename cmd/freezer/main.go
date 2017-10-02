@@ -63,12 +63,10 @@ var (
 
 	cmdFileList = cmdFile.Command("ls", "Lists all files for a user in storage.")
 
-	cmdFileRm     = cmdFile.Command("rm", "Remove a file from storage.")
-	argFileRmPath = cmdFileRm.Arg("filename", "The file to remove on the server.").Required().String()
-
-	cmdFileRmRx        = cmdFile.Command("rmrx", "Remove files from storage based on a regular expression.")
-	argFileRmRxRegex   = cmdFileRmRx.Arg("regex", "The regular expression filter to match files to remove on the server.").Required().String()
-	flagFileRmRxDryRun = cmdFileRmRx.Flag("dryrun", "Whether or not the files should actually be removed on match.").Bool()
+	cmdFileRm        = cmdFile.Command("rm", "Remove a file from storage.")
+	argFileRmPath    = cmdFileRm.Arg("filename", "The file to remove on the server.").Required().String()
+	flagFileRmRegex  = cmdFileRm.Flag("regex", "Indicates the filename is a regular expression filter to match files to remove on the server.").Bool()
+	flagFileRmDryRun = cmdFileRm.Flag("dryrun", "Whether or not the file(s) should actually be removed on match.").Bool()
 
 	// Version sub-commands
 	cmdVersions = appFlags.Command("versions", "Version management command.")
@@ -463,29 +461,16 @@ func main() {
 			log.Fatalf("Failed to initialize cryptography: %v", err)
 		}
 
-		err = cmdState.RmFile(*argFileRmPath)
-		if err != nil {
-			log.Fatalf("Failed to remove file from the server %s: %v", host, err)
-		}
-
-	case cmdFileRmRx.FullCommand():
-		username := interactiveGetLoginUser()
-		password := interactiveGetLoginPassword()
-		host := interactiveGetHost()
-
-		err := cmdState.Authenticate(host, username, password)
-		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
-		}
-
-		err = initCrypto(cmdState)
-		if err != nil {
-			log.Fatalf("Failed to initialize cryptography: %v", err)
-		}
-
-		err = cmdState.RmRxFiles(*argFileRmRxRegex, *flagFileRmRxDryRun)
-		if err != nil {
-			log.Fatalf("Failed to remove files: %v", err)
+		if !*flagFileRmRegex {
+			err = cmdState.RmFile(*argFileRmPath, *flagFileRmDryRun)
+			if err != nil {
+				log.Fatalf("Failed to remove file from the server %s: %v", host, err)
+			}
+		} else {
+			err = cmdState.RmRxFiles(*argFileRmPath, *flagFileRmDryRun)
+			if err != nil {
+				log.Fatalf("Failed to remove files: %v", err)
+			}
 		}
 
 	case cmdSync.FullCommand():
