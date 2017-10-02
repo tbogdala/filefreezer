@@ -34,6 +34,7 @@ const (
 	testFilename2  = "testdata/unit_test_2.dat"
 	testFilename3  = "testdata/subdir/unit_test_3.dat"
 	testFilename4  = "testdata/unit_test_empty.dat"
+	testRegex      = "testdata/uni*"
 )
 
 var (
@@ -946,6 +947,57 @@ func TestFileVersioning(t *testing.T) {
 	if versions[0].VersionNumber != 4 || versions[1].VersionNumber != 5 {
 		t.Fatalf("Expected to get file versions 4 and 5 for the test file but got %d and %d instead.",
 			versions[0].VersionNumber, versions[1].VersionNumber)
+	}
+
+	// test removal of files by regular expression
+
+	// first sync back some of the test files
+	syncStatus, _, err := cmdState.SyncFile(testFilename1, testFilename1, command.SyncCurrentVersion)
+	if err != nil || syncStatus != command.SyncStatusLocalNewer {
+		t.Fatalf("Failed to sync the first test file again: %v", err)
+	}
+	syncStatus, _, err = cmdState.SyncFile(testFilename1, testFilename2, command.SyncCurrentVersion)
+	if err != nil || syncStatus != command.SyncStatusLocalNewer {
+		t.Fatalf("Failed to sync the second test file again: %v", err)
+	}
+	syncStatus, _, err = cmdState.SyncFile(testFilename1, testFilename3, command.SyncCurrentVersion)
+	if err != nil || syncStatus != command.SyncStatusLocalNewer {
+		t.Fatalf("Failed to sync the third test file again: %v", err)
+	}
+
+	allFiles, err = cmdState.GetAllFileHashes()
+	if err != nil {
+		t.Fatalf("Could not get all of the files from the server: %v", err)
+	}
+	originalCount := len(allFiles)
+
+	// attempt a dry run of the pattern match and ensure no files were deleted
+	err = cmdState.RmRxFiles(testRegex, true)
+	if err != nil {
+		t.Fatalf("Failed to remove files based on the regular expression: %v", err)
+	}
+
+	allFiles, err = cmdState.GetAllFileHashes()
+	if err != nil {
+		t.Fatalf("Could not get all of the files from the server: %v", err)
+	}
+	if originalCount != len(allFiles) {
+		t.Fatalf("Dryrun was specified for RmRx operation but file count changed from %d to %d.", originalCount, len(allFiles))
+	}
+
+	// now actually remove the files
+	err = cmdState.RmRxFiles(testRegex, false)
+	if err != nil {
+		t.Fatalf("Failed to remove files based on the regular expression: %v", err)
+	}
+
+	allFiles, err = cmdState.GetAllFileHashes()
+	if err != nil {
+		t.Fatalf("Could not get all of the files from the server: %v", err)
+	}
+	if originalCount-2 != len(allFiles) {
+		t.Fatalf("RmRx operation did not delete the expected number of files %d (got: %d).",
+			originalCount-2, originalCount-len(allFiles))
 	}
 }
 

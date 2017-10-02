@@ -157,6 +157,19 @@ freezer -u admin -p 1234 -h localhost:8080 file rm hello.txt
 Notice that the command takes the name of the file on the server and not
 the local file which was originally specified on the command line.
 
+If you wanted to remove a set of files controlled by a regular expression,
+you can use the `file rmrx` command like so:
+
+```bash
+freezer -u admin -p 1234 -h localhost:8080 file rmrx --dryrun "h*"
+```
+
+The regular expression will likely have to be supplied in a quoted string to
+avoid the shell from evaluating wildcards. The `--dryrun` flag means freezer
+will output the filenames matched as if it was going to remove it, but no
+file deletion will actually happen. Remove the flag to actually remove the 
+matched files.
+
 If you make a change to the `~/hello.txt` file and sync again it will upload
 a new version of that file to the server.
 
@@ -190,6 +203,17 @@ freezer -u admin -p 1234 -s secret -h localhost:8080 syncdir /etc serverbackup/e
 This will upload the entire `/etc` folder and all of its subfolders to the server
 under a prefix of `serverbackup`. By using a prefix like this in the target of
 a `sync` or `syncdir` operation, you can logically organize different groups of files.
+
+If you needed to remove old versions of a file, you can do so by specifying an
+inclusive range in this command:
+
+```bash
+freezer -u admin -p 1234 -s secret -h localhost:8080 versions rm 1 2 hello.txt
+```
+
+This deletes the first and second version of the synced `hello.txt` file but leaves
+other versions on the server.
+
 
 
 Testing and Benchmarking
@@ -234,8 +258,6 @@ Known Bugs and Limitations
   the string as a path and not give the desired results. the fix is to use cmd.exe to 
   perform the command line execution to get the desired results.
 
-* cli to recursively remove files from storage
-
 
 TODO / Notes
 ------------
@@ -244,7 +266,9 @@ TODO / Notes
   https://blogs.dropbox.com/tech/2014/07/streaming-file-synchronization/
 
 * flag: file hashing algo
+
 * flag: hash on start instead of just checking mod time
+
 * flag: safetey level for database -- currently it is tuned to be very safe,
   but a non-zero chance of db corruption on power loss or crash. docs for
   sqlite say "in practice, you are more likely to suffer a catastrophic disk failure 
@@ -261,3 +285,9 @@ TODO / Notes
 
 * something like a general db stats command to return total files,
   chunks, versions per user/system
+
+* remove output from cmd/freezer/command functions so that they
+  are more reusable
+
+* add a special character to `versions rm` maxVersion so that it's
+  set to the current version number - 1.

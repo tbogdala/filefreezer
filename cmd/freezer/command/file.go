@@ -6,6 +6,7 @@ package command
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 
 	"github.com/tbogdala/filefreezer"
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
@@ -55,6 +56,44 @@ func (s *State) RmFile(filename string) error {
 	}
 
 	s.Printf("Removed file: %s\n", filename)
+
+	return nil
+}
+
+// RmRxFiles removes files by regular expression matching against the filenames.
+// The dryRun argument controls whether or not the actual removeal request is
+// sent to the server allowing the user to preview the result of the regex match.
+// A non-nil error is returned on failure.
+func (s *State) RmRxFiles(pattern string, dryRun bool) error {
+	allFiles, err := s.GetAllFileHashes()
+	if err != nil {
+		return fmt.Errorf("could not get all of the files from the server: %v", err)
+	}
+
+	compiledFilter, err := regexp.Compile(pattern)
+	if err != nil {
+		return fmt.Errorf("failed to compile the regular expression: %v", err)
+	}
+
+	for _, fi := range allFiles {
+		plaintextFilename, err := s.DecryptString(fi.FileName)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt one of the file names: %v", err)
+		}
+
+		if compiledFilter.MatchString(plaintextFilename) {
+			// only attempt to actually delete when not on a dryRun
+			if !dryRun {
+				target := fmt.Sprintf("%s/api/file/%d", s.HostURI, fi.FileID)
+				_, err = s.RunAuthRequest(target, "DELETE", s.AuthToken, nil)
+				if err != nil {
+					return fmt.Errorf("Failed to remove the file %s: %v", plaintextFilename, err)
+				}
+			}
+
+			s.Printf("Removed file: %s\n", plaintextFilename)
+		}
+	}
 
 	return nil
 }

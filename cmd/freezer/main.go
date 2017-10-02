@@ -66,6 +66,10 @@ var (
 	cmdFileRm     = cmdFile.Command("rm", "Remove a file from storage.")
 	argFileRmPath = cmdFileRm.Arg("filename", "The file to remove on the server.").Required().String()
 
+	cmdFileRmRx        = cmdFile.Command("rmrx", "Remove files from storage based on a regular expression.")
+	argFileRmRxRegex   = cmdFileRmRx.Arg("regex", "The regular expression filter to match files to remove on the server.").Required().String()
+	flagFileRmRxDryRun = cmdFileRmRx.Flag("dryrun", "Whether or not the files should actually be removed on match.").Bool()
+
 	// Version sub-commands
 	cmdVersions = appFlags.Command("versions", "Version management command.")
 
@@ -459,10 +463,29 @@ func main() {
 			log.Fatalf("Failed to initialize cryptography: %v", err)
 		}
 
-		filepath := *argFileRmPath
-		err = cmdState.RmFile(filepath)
+		err = cmdState.RmFile(*argFileRmPath)
 		if err != nil {
 			log.Fatalf("Failed to remove file from the server %s: %v", host, err)
+		}
+
+	case cmdFileRmRx.FullCommand():
+		username := interactiveGetLoginUser()
+		password := interactiveGetLoginPassword()
+		host := interactiveGetHost()
+
+		err := cmdState.Authenticate(host, username, password)
+		if err != nil {
+			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
+		}
+
+		err = initCrypto(cmdState)
+		if err != nil {
+			log.Fatalf("Failed to initialize cryptography: %v", err)
+		}
+
+		err = cmdState.RmRxFiles(*argFileRmRxRegex, *flagFileRmRxDryRun)
+		if err != nil {
+			log.Fatalf("Failed to remove files: %v", err)
 		}
 
 	case cmdSync.FullCommand():
