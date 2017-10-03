@@ -120,13 +120,13 @@ func TestEverything(t *testing.T) {
 	username := "admin"
 	password := "1234"
 	userQuota := int(1e9)
-	user := cmdState.AddUser(state.Storage, username, password, userQuota)
-	if user == nil {
+	user, err := cmdState.AddUser(state.Storage, username, password, userQuota)
+	if user == nil || err != nil {
 		t.Fatalf("Failed to add the test user (%s) to Storage", username)
 	}
 
 	// attempt to get the authentication token
-	err := cmdState.Authenticate(testHost, username, password)
+	err = cmdState.Authenticate(testHost, username, password)
 	if err != nil {
 		t.Fatalf("Failed to authenticate as the test user: %v", err)
 	}
@@ -504,8 +504,8 @@ func TestEverything(t *testing.T) {
 	username = "admin"
 	password = "1234"
 	userQuota = int(1e9)
-	user = cmdState.AddUser(state.Storage, username, password, userQuota)
-	if user == nil {
+	user, err = cmdState.AddUser(state.Storage, username, password, userQuota)
+	if user == nil || err != nil {
 		t.Fatalf("Failed to add the test user (%s) to Storage", username)
 	}
 
@@ -660,8 +660,8 @@ func TestFileVersioning(t *testing.T) {
 	if user != nil {
 		cmdState.RmUser(state.Storage, username)
 	}
-	user = cmdState.AddUser(state.Storage, username, password, userQuota)
-	if user == nil {
+	user, err = cmdState.AddUser(state.Storage, username, password, userQuota)
+	if user == nil || err != nil {
 		t.Fatalf("Failed to add the test user (%s) to Storage", username)
 	}
 

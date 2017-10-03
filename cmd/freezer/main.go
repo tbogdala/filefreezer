@@ -7,7 +7,6 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"log"
 	"math/rand"
 	"os"
 	"runtime/pprof"
@@ -128,9 +127,17 @@ func interactiveGetLoginUser() string {
 	}
 
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Username: ")
-	username, _ := reader.ReadString('\n')
-	return strings.TrimSpace(username)
+
+	for {
+		fmt.Print("Username: ")
+		username, _ := reader.ReadString('\n')
+		username = strings.TrimSpace(username)
+
+		// basic validation
+		if username != "" {
+			return username
+		}
+	}
 }
 
 func interactiveGetLoginPassword() string {
@@ -139,22 +146,39 @@ func interactiveGetLoginPassword() string {
 	}
 
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Password: ")
-	//fmtPrintln("\033[8m") // Hide input
-	password, _ := reader.ReadString('\n')
-	//fmtPrintln("\033[28m") // Show input
 
-	return strings.TrimSpace(password)
+	for {
+		fmt.Print("Password: ")
+		//fmtPrintln("\033[8m") // Hide input
+		password, _ := reader.ReadString('\n')
+		//fmtPrintln("\033[28m") // Show input
+		password = strings.TrimSpace(password)
+
+		// basic validation
+		if password != "" {
+			return password
+		}
+	}
 }
 
 func interactiveGetCryptoPassword() string {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Cryptography password: ")
-	//fmtPrintln("\033[8m") // Hide input
-	password, _ := reader.ReadString('\n')
-	//fmtPrintln("\033[28m") // Show input
+	if *flagCryptoPass != "" {
+		return *flagCryptoPass
+	}
 
-	return strings.TrimSpace(password)
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Print("Cryptography password: ")
+		//fmtPrintln("\033[8m") // Hide input
+		password, _ := reader.ReadString('\n')
+		//fmtPrintln("\033[28m") // Show input
+		password = strings.TrimSpace(password)
+
+		// basic validation
+		if password != "" {
+			return password
+		}
+	}
 }
 
 // initCrypto makes sure that the crypto hash has been setup
@@ -283,7 +307,8 @@ func main() {
 		cmdState.Printf("Enabling CPU Profiling!\n")
 		cpuPprofF, err := os.Create(*flagCPUProfile)
 		if err != nil {
-			log.Fatal(err)
+			fmt.Println(err.Error())
+			return
 		}
 		pprof.StartCPUProfile(cpuPprofF)
 		defer func() {
@@ -297,7 +322,8 @@ func main() {
 		// setup a new server state or exit out on failure
 		state, err := newState()
 		if err != nil {
-			log.Fatalf("Unable to initialize the server: %v", err)
+			fmt.Printf("Unable to initialize the server: %v", err)
+			return
 		}
 		defer state.close()
 		state.Storage.ChunkSize = *flagServeChunkSize
@@ -314,16 +340,28 @@ func main() {
 	case cmdUserAdd.FullCommand():
 		store, err := openStorage()
 		if err != nil {
-			log.Fatalf("Failed to open the storage database: %v", err)
+			fmt.Printf("Failed to open the storage database: %v", err)
+			return
 		}
 		username := interactiveGetLoginUser()
 		password := interactiveGetLoginPassword()
-		cmdState.AddUser(store, username, password, *flagUserAddQuota)
+
+		if username == "" || password == "" {
+			fmt.Printf("Username or password cannot be empty.")
+			return
+		}
+
+		_, err = cmdState.AddUser(store, username, password, *flagUserAddQuota)
+		if err != nil {
+			fmt.Printf("Failed to add the user: %v", err)
+			return
+		}
 
 	case cmdUserRm.FullCommand():
 		store, err := openStorage()
 		if err != nil {
-			log.Fatalf("Failed to open the storage database: %v", err)
+			fmt.Printf("Failed to open the storage database: %v", err)
+			return
 		}
 		username := interactiveGetLoginUser()
 		cmdState.RmUser(store, username)
@@ -331,10 +369,15 @@ func main() {
 	case cmdUserMod.FullCommand():
 		store, err := openStorage()
 		if err != nil {
-			log.Fatalf("Failed to open the storage database: %v", err)
+			fmt.Printf("Failed to open the storage database: %v", err)
+			return
 		}
 		username := interactiveGetLoginUser()
-		cmdState.ModUser(store, username, *flagUserModQuota, *flagUserModName, *flagUserModPass)
+		err = cmdState.ModUser(store, username, *flagUserModQuota, *flagUserModName, *flagUserModPass)
+		if err != nil {
+			fmt.Printf("Failed to change the user properties: %v", err)
+			return
+		}
 
 	case cmdUserCryptoPass.FullCommand():
 		username := interactiveGetLoginUser()
@@ -347,7 +390,8 @@ func main() {
 
 		err := cmdState.Authenticate(host, username, password)
 		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
+			fmt.Printf("Failed to authenticate to the server %s: %v", host, err)
+			return
 		}
 
 		cmdState.SetCryptoHashForPassword(*flagUserCryptoPassPW)
@@ -359,17 +403,20 @@ func main() {
 
 		err := cmdState.Authenticate(host, username, password)
 		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
+			fmt.Printf("Failed to authenticate to the server %s: %v", host, err)
+			return
 		}
 
 		err = initCrypto(cmdState)
 		if err != nil {
-			log.Fatalf("Failed to initialize cryptography: %v", err)
+			fmt.Printf("Failed to initialize cryptography: %v", err)
+			return
 		}
 
 		allFiles, err := cmdState.GetAllFileHashes()
 		if err != nil {
-			log.Fatalf("Failed to get all of the files for the user %s from the storage server %s: %v", username, host, err)
+			fmt.Printf("Failed to get all of the files for the user %s from the storage server %s: %v", username, host, err)
+			return
 		}
 
 		fmtPrintf("Registered files for %s:\n", username)
@@ -403,17 +450,20 @@ func main() {
 
 		err := cmdState.Authenticate(host, username, password)
 		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
+			fmt.Printf("Failed to authenticate to the server %s: %v", host, err)
+			return
 		}
 
 		err = initCrypto(cmdState)
 		if err != nil {
-			log.Fatalf("Failed to initialize cryptography: %v", err)
+			fmt.Printf("Failed to initialize cryptography: %v", err)
+			return
 		}
 
 		versions, err := cmdState.GetFileVersions(*argVersionsListTarget)
 		if err != nil {
-			log.Fatalf("Failed to get the file versions for the user %s from the storage server %s: %v", username, host, err)
+			fmt.Printf("Failed to get the file versions for the user %s from the storage server %s: %v", username, host, err)
+			return
 		}
 
 		cmdState.Printf("Registered versions for %s:\n", *argVersionsListTarget)
@@ -433,12 +483,14 @@ func main() {
 
 		err := cmdState.Authenticate(host, username, password)
 		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
+			fmt.Printf("Failed to authenticate to the server %s: %v", host, err)
+			return
 		}
 
 		err = initCrypto(cmdState)
 		if err != nil {
-			log.Fatalf("Failed to initialize cryptography: %v", err)
+			fmt.Printf("Failed to initialize cryptography: %v", err)
+			return
 		}
 
 		// attempt to remove the file versions
@@ -447,13 +499,15 @@ func main() {
 			if *argVersionsRmMax == "H~" {
 				fi, err := cmdState.GetFileInfoByFilename(*argVersionsRmTarget)
 				if err != nil {
-					log.Fatalf("Failed to get the file information for %s: %v", *argVersionsRmTarget, err)
+					fmt.Printf("Failed to get the file information for %s: %v", *argVersionsRmTarget, err)
+					return
 				}
 				maxVersion = fi.CurrentVersion.VersionNumber - 1
 			} else {
 				maxVersion, err = strconv.Atoi(*argVersionsRmMax)
 				if err != nil {
-					log.Fatalf("Failed to parse the supplied max version as a number: %v", err)
+					fmt.Printf("Failed to parse the supplied max version as a number: %v", err)
+					return
 				}
 			}
 
@@ -477,23 +531,27 @@ func main() {
 
 		err := cmdState.Authenticate(host, username, password)
 		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
+			fmt.Printf("Failed to authenticate to the server %s: %v", host, err)
+			return
 		}
 
 		err = initCrypto(cmdState)
 		if err != nil {
-			log.Fatalf("Failed to initialize cryptography: %v", err)
+			fmt.Printf("Failed to initialize cryptography: %v", err)
+			return
 		}
 
 		if !*flagFileRmRegex {
 			err = cmdState.RmFile(*argFileRmPath, *flagFileRmDryRun)
 			if err != nil {
-				log.Fatalf("Failed to remove file from the server %s: %v", host, err)
+				fmt.Printf("Failed to remove file from the server %s: %v", host, err)
+				return
 			}
 		} else {
 			err = cmdState.RmRxFiles(*argFileRmPath, *flagFileRmDryRun)
 			if err != nil {
-				log.Fatalf("Failed to remove files: %v", err)
+				fmt.Printf("Failed to remove files: %v", err)
+				return
 			}
 		}
 
@@ -504,12 +562,14 @@ func main() {
 
 		err := cmdState.Authenticate(host, username, password)
 		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
+			fmt.Printf("Failed to authenticate to the server %s: %v", host, err)
+			return
 		}
 
 		err = initCrypto(cmdState)
 		if err != nil {
-			log.Fatalf("Failed to initialize cryptography: %v", err)
+			fmt.Printf("Failed to initialize cryptography: %v", err)
+			return
 		}
 
 		filepath := *argSyncPath
@@ -526,7 +586,8 @@ func main() {
 
 		_, _, err = cmdState.SyncFile(filepath, remoteFilepath, syncVersion)
 		if err != nil {
-			log.Fatalf("Failed to synchronize the path %s: %v", filepath, err)
+			fmt.Printf("Failed to synchronize the path %s: %v", filepath, err)
+			return
 		}
 
 	case cmdSyncDir.FullCommand():
@@ -536,12 +597,14 @@ func main() {
 
 		err := cmdState.Authenticate(host, username, password)
 		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
+			fmt.Printf("Failed to authenticate to the server %s: %v", host, err)
+			return
 		}
 
 		err = initCrypto(cmdState)
 		if err != nil {
-			log.Fatalf("Failed to initialize cryptography: %v", err)
+			fmt.Printf("Failed to initialize cryptography: %v", err)
+			return
 		}
 
 		filepath := *argSyncDirPath
@@ -551,7 +614,8 @@ func main() {
 		}
 		_, err = cmdState.SyncDirectory(filepath, remoteFilepath)
 		if err != nil {
-			log.Fatalf("Failed to synchronize the directory %s: %v", filepath, err)
+			fmt.Printf("Failed to synchronize the directory %s: %v", filepath, err)
+			return
 		}
 
 	case cmdUserStats.FullCommand():
@@ -561,12 +625,14 @@ func main() {
 
 		err := cmdState.Authenticate(host, username, password)
 		if err != nil {
-			log.Fatalf("Failed to authenticate to the server %s: %v", host, err)
+			fmt.Printf("Failed to authenticate to the server %s: %v", host, err)
+			return
 		}
 
 		_, err = cmdState.GetUserStats()
 		if err != nil {
-			log.Fatalf("Failed to get the user stats from the server %s: %v", host, err)
+			fmt.Printf("Failed to get the user stats from the server %s: %v", host, err)
+			return
 		}
 
 	}

@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/labstack/echo"
@@ -79,13 +80,14 @@ func (state *serverState) serve(readyCh chan bool) (quitCh chan bool) {
 	// NOTE: doesn't appear to work on windows
 	stop := make(chan os.Signal)
 	quitCh = make(chan bool)
-	signal.Notify(stop, os.Interrupt)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-stop
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		fmtPrintln("Shutting down server...")
 		if err := e.Shutdown(ctx); err != nil {
+			state.close()
 			log.Fatalf("could not shutdown: %v", err)
 		}
 

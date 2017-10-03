@@ -6,7 +6,6 @@ package command
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 
 	"github.com/tbogdala/filefreezer"
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
@@ -14,23 +13,22 @@ import (
 
 // AddUser adds a user to the database using the username, password and quota provided.
 // The store object will take care of generating the salt and salted password.
-func (s *State) AddUser(store *filefreezer.Storage, username string, password string, quota int) *filefreezer.User {
+func (s *State) AddUser(store *filefreezer.Storage, username string, password string, quota int) (*filefreezer.User, error) {
 	// generate the salt and salted login password hash
 	salt, saltedPass, err := filefreezer.GenLoginPasswordHash(password)
 	if err != nil {
-		log.Fatalf("Failed to generate a password hash %v", err)
+		return nil, fmt.Errorf("Failed to generate a password hash %v", err)
 	}
 
 	// add the user to the database with CryptoHash empty as that will be
 	// set by the client.
 	user, err := store.AddUser(username, salt, saltedPass, quota)
 	if err != nil {
-		log.Fatalf("Failed to create the user %s: %v", username, err)
-		return nil
+		return nil, fmt.Errorf("Failed to create the user %s: %v", username, err)
 	}
 
 	s.Println("User created successfully")
-	return user
+	return user, nil
 }
 
 // RmUser removes a user from the database using the username as akey.
@@ -38,7 +36,7 @@ func (s *State) RmUser(store *filefreezer.Storage, username string) error {
 	// add the user to the database
 	err := store.RemoveUser(username)
 	if err != nil {
-		log.Fatalf("Failed to remove the user %s: %v", username, err)
+		return fmt.Errorf("Failed to remove the user %s: %v", username, err)
 	}
 
 	s.Println("User removed successfully")
@@ -47,15 +45,15 @@ func (s *State) RmUser(store *filefreezer.Storage, username string) error {
 
 // ModUser modifies a user in the database. if the newQuota, newUsername or newPassword
 // fields are non-nil then their values are updated in the database.
-func (s *State) ModUser(store *filefreezer.Storage, username string, newQuota int, newUsername string, newPassword string) {
+func (s *State) ModUser(store *filefreezer.Storage, username string, newQuota int, newUsername string, newPassword string) error {
 	// get existing user
 	user, err := store.GetUser(username)
 	if err != nil {
-		log.Fatalf("Failed to get an existing user with the name %s: %v", username, err)
+		return fmt.Errorf("Failed to get an existing user with the name %s: %v", username, err)
 	}
 	stats, err := store.GetUserStats(user.ID)
 	if err != nil {
-		log.Fatalf("Failed to get an existing user stats with the name %s: %v", username, err)
+		return fmt.Errorf("Failed to get an existing user stats with the name %s: %v", username, err)
 	}
 
 	updatedName := user.Name
@@ -68,7 +66,7 @@ func (s *State) ModUser(store *filefreezer.Storage, username string, newQuota in
 	if newPassword != "" {
 		updatedSalt, updatedSaltedHash, err = filefreezer.GenLoginPasswordHash(newPassword)
 		if err != nil {
-			log.Fatalf("Failed to generate a password hash %v", err)
+			return fmt.Errorf("Failed to generate a password hash %v", err)
 		}
 	}
 
@@ -81,10 +79,11 @@ func (s *State) ModUser(store *filefreezer.Storage, username string, newQuota in
 	// and through the web API.
 	err = store.UpdateUser(user.ID, updatedName, updatedSalt, updatedSaltedHash, user.CryptoHash, updatedQuota)
 	if err != nil {
-		log.Fatalf("Failed to modify the user %s: %v", username, err)
+		return fmt.Errorf("Failed to modify the user %s: %v", username, err)
 	}
 
 	s.Println("User modified successfully")
+	return nil
 }
 
 // GetUserStats returns a UserStats object for the authenticated user
