@@ -43,6 +43,20 @@ the `freezer` CLI executable to $GOROOT/bin.
 go get github.com/tbogdala/filefreezer/...
 go install github.com/tbogdala/filefreezer/cmd/freezer
 ```
+---
+
+Another way to quickly deploy Filefreezer is to use [Docker](https://www.docker.com) and pull
+the current image from [Docker Hub](https://hub.docker.com/r/tbogdala/filefreezer/)
+
+```bash
+sudo docker pull tbogdala/filefreezer:0.9.0
+sudo docker run --rm -v $HOME/freezer:/data tbogdala/filefreezer:0.9.0 user add -u admin -p 1234
+sudo docker run --read-only --rm -v $HOME/freezer:/data -p 8040:8080 tbogdala/filefreezer:0.9.0
+```
+
+For more information, see the page on [Docker Hub](https://hub.docker.com/r/tbogdala/filefreezer/).
+
+---
 
 To build the project manually from source code, you will want to vendor the
 depenencies used by the project. This process is now managed by Go's 
