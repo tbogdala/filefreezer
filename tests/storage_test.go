@@ -1000,14 +1000,14 @@ func TestVersionRemoval(t *testing.T) {
 		t.Fatal("Expected only the fourth and fith version of the test file to survive.")
 	}
 
-	// try to delete an out of bounds version to make sure it returns an error
+	// try to delete an out of bounds version to make sure it does not return an error
 	err = store.RemoveFileVersions(user.ID, fi.FileID, 100, 300)
-	if err == nil {
-		t.Fatal("Expected an error for attempting to remove out of bounds file versions")
+	if err != nil {
+		t.Fatal("Error received for attempting to remove out of bounds file versions")
 	}
 	err = store.RemoveFileVersions(user.ID, fi.FileID, -300, -10)
-	if err == nil {
-		t.Fatal("Expected an error for attempting to remove out of bounds file versions")
+	if err != nil {
+		t.Fatal("Error received for attempting to remove out of bounds file versions")
 	}
 }
 
