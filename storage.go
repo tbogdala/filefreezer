@@ -93,6 +93,7 @@ const (
 	removeAllFileVersionsByFileID = `DELETE FROM FileVersion WHERE FileID = ?;`
 	removeFileVersionsByFileID    = `DELETE FROM FileVersion WHERE FileID = ? AND (VersionNum BETWEEN ? AND ?);`
 	getVersionsForFile            = `SELECT VersionID, VersionNum, Perms, LastMod, ChunkCount, FileHash FROM FileVersion WHERE FileID = ?;`
+	getVersionsCountForFile       = `SELECT COUNT(*) AS COUNT FROM FileVersion WHERE FileID = ? AND (VersionNum BETWEEN ? AND ?);`
 	getFileVersionsTotalChunkSize = `SELECT SUM(LENGTH(Chunk)) FROM FileChunks 
 					INNER JOIN FileVersion on FileChunks.VersionID = FileVersion.VersionID
 					WHERE FileChunks.FileID = ? AND (VersionNum BETWEEN ? AND ?);`
@@ -500,6 +501,18 @@ func (s *Storage) RemoveFileVersions(userID, fileID, minVersion, maxVersion int)
 		}
 		if owningUserID != userID {
 			return fmt.Errorf("user does not own the file id supplied")
+		}
+
+		// make sure there are versions to remove
+		var versionsToRemove int
+		err = tx.QueryRow(getVersionsCountForFile, fileID, minVersion, maxVersion).Scan(&versionsToRemove)
+		if err != nil {
+			return fmt.Errorf("failed to get the number of versions that are within range: %v", err)
+		}
+
+		// if we dont have any versions to remove, just return now without an error
+		if versionsToRemove < 1 {
+			return nil
 		}
 
 		// get the total chunk size used by the file versions

@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"os"
 	"runtime/pprof"
+	"strconv"
 	"time"
 
 	"github.com/tbogdala/filefreezer"
@@ -74,10 +75,12 @@ var (
 	cmdVersionsList       = cmdVersions.Command("ls", "Lists all versions for a file in storage.")
 	argVersionsListTarget = cmdVersionsList.Arg("target", "The file path to on the server to get version information for.").String()
 
-	cmdVersionsRm       = cmdVersions.Command("rm", "Remove a file from storage.")
-	argVersionsRmMin    = cmdVersionsRm.Arg("minversion", "The minimum version number to remove.").Required().Int()
-	argVersionsRmMax    = cmdVersionsRm.Arg("maxversion", "The maximum version number to remove.").Required().Int()
-	argVersionsRmTarget = cmdVersionsRm.Arg("target", "The file to remove on the server.").Required().String()
+	cmdVersionsRm        = cmdVersions.Command("rm", "Remove a file from storage.")
+	argVersionsRmMin     = cmdVersionsRm.Arg("minversion", "The minimum version number to remove.").Required().Int()
+	argVersionsRmMax     = cmdVersionsRm.Arg("maxversion", "The maximum version number to remove ('H~' is the current version number - 1).").Required().String()
+	argVersionsRmTarget  = cmdVersionsRm.Arg("target", "The file to remove on the server.").Required().String()
+	flagVersionsRmRegex  = cmdVersionsRm.Flag("regex", "Indicates the filename is a regular expression filter to match files to remove versions on the server.").Bool()
+	flagVersionsRmDryRun = cmdVersionsRm.Flag("dryrun", "Whether or not the versions should actually be removed on match.").Bool()
 
 	// Sync commands
 	cmdSync         = appFlags.Command("sync", "Synchronizes a path with the server.")
@@ -304,7 +307,7 @@ func main() {
 		for {
 			select {
 			case <-quitCh:
-				os.Exit(0)
+				return
 			}
 		}
 
@@ -439,11 +442,32 @@ func main() {
 		}
 
 		// attempt to remove the file versions
-		err = cmdState.RmFileVersions(*argVersionsRmTarget, *argVersionsRmMin, *argVersionsRmMax)
-		if err != nil {
-			cmdState.Printf("Failed to remove the versions: %v\n", err)
+		if !*flagVersionsRmRegex {
+			var maxVersion int
+			if *argVersionsRmMax == "H~" {
+				fi, err := cmdState.GetFileInfoByFilename(*argVersionsRmTarget)
+				if err != nil {
+					log.Fatalf("Failed to get the file information for %s: %v", *argVersionsRmTarget, err)
+				}
+				maxVersion = fi.CurrentVersion.VersionNumber - 1
+			} else {
+				maxVersion, err = strconv.Atoi(*argVersionsRmMax)
+				if err != nil {
+					log.Fatalf("Failed to parse the supplied max version as a number: %v", err)
+				}
+			}
+
+			err = cmdState.RmFileVersions(*argVersionsRmTarget, *argVersionsRmMin, maxVersion, *flagVersionsRmDryRun)
+			if err != nil {
+				cmdState.Printf("Failed to remove the versions: %v\n", err)
+			} else {
+				cmdState.Printf("Successfully removed versions %d to %d.\n", *argVersionsRmMin, maxVersion)
+			}
 		} else {
-			cmdState.Printf("Successfully removed versions %d to %d.\n", *argVersionsRmMin, *argVersionsRmMax)
+			err = cmdState.RmRxFileVersions(*argVersionsRmTarget, *argVersionsRmMin, *argVersionsRmMax, *flagVersionsRmDryRun)
+			if err != nil {
+				cmdState.Printf("Failed to remove the versions: %v\n", err)
+			}
 		}
 
 	case cmdFileRm.FullCommand():

@@ -214,6 +214,20 @@ freezer -u admin -p 1234 -s secret -h localhost:8080 versions rm 1 2 hello.txt
 This deletes the first and second version of the synced `hello.txt` file but leaves
 other versions on the server.
 
+If you wished to remove all of the file versions except the current one, you can
+use this syntax where `H~` gets interpreted as (Current Version - 1):
+
+```bash
+freezer -u admin -p 1234 -s secret -h localhost:8080 versions rm 1 H~ hello.txt
+```
+
+You can also use the regular expression matching to remove all but the current
+version of all files in storage by running the following command (thereby
+saving some space):
+
+```bash
+freezer -u admin -p 1234 -s secret -h localhost:8080 versions rm 1 H~ --regex ".*"
+```
 
 
 Testing and Benchmarking
@@ -288,6 +302,3 @@ TODO / Notes
 
 * remove output from cmd/freezer/command functions so that they
   are more reusable
-
-* add a special character to `versions rm` maxVersion so that it's
-  set to the current version number - 1.

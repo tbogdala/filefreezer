@@ -279,7 +279,7 @@ func handleDeleteFileVersions(state *serverState) echo.HandlerFunc {
 
 		err = state.Storage.RemoveFileVersions(claims.UserID, int(fileID), req.MinVersion, req.MaxVersion)
 		if err != nil {
-			return c.String(http.StatusBadRequest, "Failed to remove file versions for the file.")
+			return c.String(http.StatusBadRequest, "Failed to remove file versions for the file: "+err.Error())
 		}
 
 		return c.JSON(http.StatusOK, &models.FileDeleteVersionsResponse{

@@ -931,7 +931,7 @@ func TestFileVersioning(t *testing.T) {
 	}
 
 	// at this point we have five versions. attempt to delete the first three
-	err = cmdState.RmFileVersions(filename, 1, 3)
+	err = cmdState.RmFileVersions(filename, 1, 3, false)
 	if err != nil {
 		t.Fatalf("Error while attempting to remove the first three versions of the test file: %v", err)
 	}
@@ -947,6 +947,24 @@ func TestFileVersioning(t *testing.T) {
 	if versions[0].VersionNumber != 4 || versions[1].VersionNumber != 5 {
 		t.Fatalf("Expected to get file versions 4 and 5 for the test file but got %d and %d instead.",
 			versions[0].VersionNumber, versions[1].VersionNumber)
+	}
+
+	// attempt removal of a version by regular expression
+	err = cmdState.RmRxFileVersions(testRegex, 1, "H~", false)
+	if err != nil {
+		t.Fatalf("Error while attempting to remove one version of the test file by regex: %v", err)
+	}
+
+	// verify that we only have one version left
+	versions, err = cmdState.GetFileVersions(filename)
+	if err != nil {
+		t.Fatalf("Failed to get the file versions for the test file: %v", err)
+	}
+	if len(versions) != 1 {
+		t.Fatalf("Expected to get one file version for the test file but received %d.", len(versions))
+	}
+	if versions[0].VersionNumber != 5 {
+		t.Fatalf("Expected to get file versions 5 for the test file but got %d instead.", versions[0].VersionNumber)
 	}
 
 	// test removal of files by regular expression

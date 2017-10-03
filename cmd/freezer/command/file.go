@@ -6,7 +6,9 @@ package command
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
+	"strconv"
 
 	"github.com/tbogdala/filefreezer"
 	"github.com/tbogdala/filefreezer/cmd/freezer/models"
@@ -126,6 +128,10 @@ func (s *State) GetFileVersions(filename string) (versions []filefreezer.FileVer
 	// get the file id for the filename provided
 	target := fmt.Sprintf("%s/api/file/%d/versions", s.HostURI, fi.FileID)
 	body, err := s.RunAuthRequest(target, "GET", s.AuthToken, nil)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get the file versions for %s: %v", target, err)
+	}
+
 	var r models.FileGetAllVersionsResponse
 	err = json.Unmarshal(body, &r)
 	if err != nil {
@@ -137,7 +143,7 @@ func (s *State) GetFileVersions(filename string) (versions []filefreezer.FileVer
 
 // RmFileVersions removes a range of versions (inclusive) from minVersion to
 // maxVersion from storage. A non-nil error is returned on failure.
-func (s *State) RmFileVersions(filename string, minVersion int, maxVersion int) error {
+func (s *State) RmFileVersions(filename string, minVersion int, maxVersion int, dryRun bool) error {
 	fi, err := s.GetFileInfoByFilename(filename)
 	if err != nil {
 		return err
@@ -147,17 +153,94 @@ func (s *State) RmFileVersions(filename string, minVersion int, maxVersion int) 
 	putReq.MinVersion = minVersion
 	putReq.MaxVersion = maxVersion
 
-	// get the file id for the filename provided
-	target := fmt.Sprintf("%s/api/file/%d/versions", s.HostURI, fi.FileID)
-	body, err := s.RunAuthRequest(target, "DELETE", s.AuthToken, putReq)
-	var r models.FileDeleteVersionsResponse
-	err = json.Unmarshal(body, &r)
-	if err != nil {
-		return fmt.Errorf("Failed to delete the file versions: %v", err)
+	if maxVersion >= fi.CurrentVersion.VersionNumber {
+		return fmt.Errorf("the maxiumum version number cannot be equal or greater than the current version number")
 	}
 
-	if !r.Status {
-		return fmt.Errorf("an unknown error caused a failed status to be returned while deleting file versions")
+	// get the file id for the filename provided
+	if !dryRun {
+		target := fmt.Sprintf("%s/api/file/%d/versions", s.HostURI, fi.FileID)
+		body, err := s.RunAuthRequest(target, "DELETE", s.AuthToken, putReq)
+		if err != nil {
+			return fmt.Errorf("Failed to delete the file versions for %s: %v", target, err)
+		}
+
+		var r models.FileDeleteVersionsResponse
+		err = json.Unmarshal(body, &r)
+		if err != nil {
+			return fmt.Errorf("Failed to delete the file versions: %v", err)
+		}
+
+		if !r.Status {
+			return fmt.Errorf("an unknown error caused a failed status to be returned while deleting file versions")
+		}
+	}
+	return nil
+}
+
+// RmRxFileVersions removes a range of versions (inclusive) from minVersion to
+// maxVersion from storage for all files matching a regexp pattern.
+// A non-nil error is returned on failure.
+func (s *State) RmRxFileVersions(pattern string, minVersion int, maxVersionStr string, dryRun bool) error {
+	allFiles, err := s.GetAllFileHashes()
+	if err != nil {
+		return fmt.Errorf("could not get all of the files from the server: %v", err)
+	}
+
+	compiledFilter, err := regexp.Compile(pattern)
+	if err != nil {
+		return fmt.Errorf("failed to compile the regular expression: %v", err)
+	}
+
+	for _, fi := range allFiles {
+		plaintextFilename, err := s.DecryptString(fi.FileName)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt one of the file names: %v", err)
+		}
+
+		if compiledFilter.MatchString(plaintextFilename) {
+			var maxVersion int
+			if maxVersionStr == "H~" {
+				maxVersion = fi.CurrentVersion.VersionNumber - 1
+			} else {
+				maxVersion, err = strconv.Atoi(maxVersionStr)
+				if err != nil {
+					log.Fatalf("Failed to parse the supplied max version as a number: %v", err)
+				}
+			}
+
+			// silently ignore any file where the max version is >= the current version.
+			// a case where this applies is regex matching a file with only one version and
+			// supplying "H~" which will then evaluate to 0.
+			if maxVersion >= fi.CurrentVersion.VersionNumber {
+				continue
+			}
+
+			// only attempt to actually delete when not on a dryRun
+			if !dryRun {
+				var putReq models.FileDeleteVersionsRequest
+				putReq.MinVersion = minVersion
+				putReq.MaxVersion = maxVersion
+
+				target := fmt.Sprintf("%s/api/file/%d/versions", s.HostURI, fi.FileID)
+				body, err := s.RunAuthRequest(target, "DELETE", s.AuthToken, putReq)
+				if err != nil {
+					return fmt.Errorf("Failed to delete the file versions for %s: %v", plaintextFilename, err)
+				}
+
+				var r models.FileDeleteVersionsResponse
+				err = json.Unmarshal(body, &r)
+				if err != nil {
+					return fmt.Errorf("Failed to delete the file versions for %s: %v", plaintextFilename, err)
+				}
+
+				if !r.Status {
+					return fmt.Errorf("an unknown error caused a failed status to be returned while deleting file versions")
+				}
+			}
+
+			s.Printf("%s -- successfully removed versions %d to %d.\n", plaintextFilename, minVersion, maxVersion)
+		}
 	}
 
 	return nil
@@ -170,6 +253,10 @@ func (s *State) GetMissingChunksForFile(fileID int) ([]int, error) {
 	// get the file id for the filename provided
 	target := fmt.Sprintf("%s/api/file/%d", s.HostURI, fileID)
 	body, err := s.RunAuthRequest(target, "GET", s.AuthToken, nil)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get the file's missing chunk list: %v", err)
+	}
+
 	var r models.FileGetResponse
 	err = json.Unmarshal(body, &r)
 	if err != nil {
