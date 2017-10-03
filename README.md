@@ -1,13 +1,18 @@
-File Freezer
-============
+Filefreezer (Alpha 1)
+======================
 
 A simple to deploy cloud file storage multi-user system; Licensed under the GPL v3.
 
 Have you ever wanted an easy to deploy server for backing up files and
-storing them encrypted on a remote machine? File Freezer does that! It 
+storing them encrypted on a remote machine? Filefreezer does that! It 
 also keeps versions of the files that have been added to the server so that
 you can go back in the file history and pull up old versions of the files.
 
+Alpha 1 is the first public release of the project. It's passing all of the projects
+unit tests. Please try it out and report any bugs or any instabilities you find. 
+A GUI front end is under development and a web front end will follow shortly after.
+
+**Because it is an alpha release, please don't trust it for reliability yet!**
 
 Features
 --------
@@ -24,13 +29,13 @@ Features
 
 * Public RESTful API that can be used by other clients
 
-**API AND DATABASE STABILITY NOT GUARANTEED!**
+**ALPHA RELEASE: API AND DATABASE STABILITY NOT GUARANTEED!**
 
 
 Installation
 ------------
 
-The quick way to install file freezer is to use `go get` to download
+The quick way to install Filefreezer is to use `go get` to download
 the repository and its dependences and then `go install` to install
 the `freezer` CLI executable to $GOROOT/bin.
 

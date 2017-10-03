@@ -273,7 +273,7 @@ func main() {
 		cmdState.SetQuiet(true)
 	}
 
-	cmdState.Println("Filefreezer Copyright (C) 2017 by Timothy Bogdala <tdb@animal-machine.com>")
+	cmdState.Println("Filefreezer (Alpha-1) Copyright (C) 2017 by Timothy Bogdala <tdb@animal-machine.com>")
 	cmdState.Println("This program comes with ABSOLUTELY NO WARRANTY. This is free software")
 	cmdState.Println("and you are welcome to redistribute it under certain conditions.")
 	cmdState.Println("")
