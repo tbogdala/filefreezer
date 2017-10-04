@@ -1,4 +1,4 @@
-Filefreezer (Alpha 1)
+Filefreezer (Development 0.9.X)
 ======================
 
 A simple to deploy cloud file storage multi-user system; Licensed under the GPL v3.

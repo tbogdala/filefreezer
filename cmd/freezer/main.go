@@ -68,6 +68,10 @@ var (
 	flagFileRmRegex  = cmdFileRm.Flag("regex", "Indicates the filename is a regular expression filter to match files to remove on the server.").Bool()
 	flagFileRmDryRun = cmdFileRm.Flag("dryrun", "Whether or not the file(s) should actually be removed on match.").Bool()
 
+	cmdFileCat         = cmdFile.Command("cat", "Write the file to stdout.")
+	cmdFileCatPath     = cmdFileCat.Arg("filename", "The file to write to stdout on the server.").Required().String()
+	flagFileCatVersion = cmdFileCat.Flag("version", "Specifies a version number to retreive instead of the current version").Int()
+
 	// Version sub-commands
 	cmdVersions = appFlags.Command("versions", "Version management command.")
 
@@ -297,10 +301,14 @@ func main() {
 		cmdState.SetQuiet(true)
 	}
 
-	cmdState.Println("Filefreezer (Alpha-1) Copyright (C) 2017 by Timothy Bogdala <tdb@animal-machine.com>")
-	cmdState.Println("This program comes with ABSOLUTELY NO WARRANTY. This is free software")
-	cmdState.Println("and you are welcome to redistribute it under certain conditions.")
-	cmdState.Println("")
+	// we won't print the header while running certain commands that might be more
+	// directly piped to other commands like `file cat`.
+	if parsedFlags != cmdFileCat.FullCommand() {
+		cmdState.Println("Filefreezer (Alpha-1) Copyright (C) 2017 by Timothy Bogdala <tdb@animal-machine.com>")
+		cmdState.Println("This program comes with ABSOLUTELY NO WARRANTY. This is free software")
+		cmdState.Println("and you are welcome to redistribute it under certain conditions.")
+		cmdState.Println("")
+	}
 
 	// potentially enable cpu profiling
 	if *flagCPUProfile != "" {
@@ -553,6 +561,65 @@ func main() {
 				fmt.Printf("Failed to remove files: %v", err)
 				return
 			}
+		}
+
+	case cmdFileCat.FullCommand():
+		username := interactiveGetLoginUser()
+		password := interactiveGetLoginPassword()
+		host := interactiveGetHost()
+
+		err := cmdState.Authenticate(host, username, password)
+		if err != nil {
+			fmt.Printf("Failed to authenticate to the server %s: %v\n", host, err)
+			return
+		}
+
+		err = initCrypto(cmdState)
+		if err != nil {
+			fmt.Printf("Failed to initialize cryptography: %v\n", err)
+			return
+		}
+
+		// first we're going to pull the information for the file
+		fi, err := cmdState.GetFileInfoByFilename(*cmdFileCatPath)
+		if err != nil {
+			fmt.Printf("Failed to get the file information from the server: %v\n", err)
+			return
+		}
+
+		// if we got a version flag specified, retreive the version info to
+		// get the number of chunks to get. default it to the current version's chunk count.
+		versionID := fi.CurrentVersion.VersionID
+		chunkCount := fi.CurrentVersion.ChunkCount
+		if *flagFileCatVersion != 0 {
+			// now that we have the version number we want, lets pull the info
+			versionInfo, err := cmdState.GetFileVersion(fi.FileID, *flagFileCatVersion)
+			if err != nil {
+				fmt.Printf("Couldn't get the version secified (%d): %v\n", *flagFileCatVersion, err)
+				return
+			}
+			if versionInfo == nil {
+				fmt.Printf("Couldn't find the version number specified.\n")
+				return
+			}
+
+			// now set the version specific information
+			chunkCount = versionInfo.ChunkCount
+			versionID = versionInfo.VersionID
+		}
+
+		// now we're going to pull chunks sequentially and write them out to stdout
+		f := bufio.NewWriter(os.Stdout)
+		defer f.Flush()
+		for i := 0; i < chunkCount; i++ {
+			bytes, err := cmdState.GetFileChunk(fi.FileID, versionID, i)
+			if err != nil {
+				fmt.Printf("Failed to get the bytes for chunk #%d: %v", i, err)
+				return
+			}
+
+			f.Write(bytes)
+			f.Flush()
 		}
 
 	case cmdSync.FullCommand():

@@ -125,7 +125,7 @@ func (s *State) GetFileVersions(filename string) (versions []filefreezer.FileVer
 		return nil, err
 	}
 
-	// get the file id for the filename provided
+	// get all of the version data for a given file
 	target := fmt.Sprintf("%s/api/file/%d/versions", s.HostURI, fi.FileID)
 	body, err := s.RunAuthRequest(target, "GET", s.AuthToken, nil)
 	if err != nil {
@@ -139,6 +139,31 @@ func (s *State) GetFileVersions(filename string) (versions []filefreezer.FileVer
 	}
 
 	return r.Versions, nil
+}
+
+// GetFileVersion will return the version information matching the version number
+// for a given file ID in storage. A non-nil error value is returned on failure.
+func (s *State) GetFileVersion(fileID int, versionNum int) (*filefreezer.FileVersionInfo, error) {
+	// get all of the version data for a given file
+	target := fmt.Sprintf("%s/api/file/%d/versions", s.HostURI, fileID)
+	body, err := s.RunAuthRequest(target, "GET", s.AuthToken, nil)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get the file versions for file id %d: %v", fileID, err)
+	}
+
+	var r models.FileGetAllVersionsResponse
+	err = json.Unmarshal(body, &r)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get the file versions: %v", err)
+	}
+
+	for _, versionInfo := range r.Versions {
+		if versionInfo.VersionNumber == versionNum {
+			return &versionInfo, nil
+		}
+	}
+
+	return nil, nil
 }
 
 // RmFileVersions removes a range of versions (inclusive) from minVersion to
@@ -264,4 +289,23 @@ func (s *State) GetMissingChunksForFile(fileID int) ([]int, error) {
 	}
 
 	return r.MissingChunks, nil
+}
+
+// GetFileChunk will return a byte slice of the chunk data for the version of the file
+// specified in the parameters. A non-nil error value is returned on failure.
+func (s *State) GetFileChunk(fileID int, versionID int, chunkNum int) ([]byte, error) {
+	// call straight into the api with the parameters to get the chunk
+	target := fmt.Sprintf("%s/api/chunk/%d/%d/%d", s.HostURI, fileID, versionID, chunkNum)
+	body, err := s.RunAuthRequest(target, "GET", s.AuthToken, nil)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get the file's chunk data: %v", err)
+	}
+
+	// write out the chunk that was downloaded
+	uncryptoBytes, err := s.decryptBytes(body)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to decrypt the the chunk bytes: %v", err)
+	}
+
+	return uncryptoBytes, nil
 }
