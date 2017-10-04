@@ -203,6 +203,13 @@ running the following command:
 freezer -u admin -p 1234 -s secret -h localhost:8080 versions ls hello.txt
 ```
 
+If you wanted only to see the content of `hello.txt` you can use the following
+command to print the unencrypted version of it:
+
+```bash
+freezer -u admin -p 1234 -s secret -h localhost:8080 file cat hello.txt
+```
+
 If you wanted to syncronize the local file back to the first version of the
 file, you can do so with the following command which will overrite the local
 file with the original version of the file still stored on the server:

@@ -61,7 +61,7 @@ func InitRoutes(state *serverState, e *echo.Echo) {
 	// returns a file information response with missing chunk list
 	restricted.GET("/file/:fileid", handleGetFile(state))
 
-	// handles registering a new file version for a given file id
+	// handles getting all of the versions for a given file id
 	restricted.GET("/file/:fileid/versions", handleGetAllFileVersion(state))
 
 	// handles registering a new file version for a given file id
