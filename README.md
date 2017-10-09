@@ -1,6 +1,8 @@
 Filefreezer (Development 0.9.X)
 ======================
 
+[![Development Build Status](https://travis-ci.org/tbogdala/filefreezer.svg?branch=development)](https://travis-ci.org/tbogdala/filefreezer)
+
 A simple to deploy cloud file storage multi-user system; Licensed under the GPL v3.
 
 Have you ever wanted an easy to deploy server for backing up files and
