@@ -11,4 +11,4 @@ install:
   - dep ensure 
 
 script: 
-  - cd test && go test && ../cmd/freezer && go test
+  - cd tests && go test && cd ../cmd/freezer && go test && cd ../..
