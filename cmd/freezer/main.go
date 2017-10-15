@@ -21,6 +21,10 @@ import (
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
 
+var (
+	versionString = "v0.9.0 DEVELOPMENT"
+)
+
 // User kingpin to define a set of commands and flags for the application.
 var (
 	appFlags         = kingpin.New("freezer", "A command-line interface to filefreezer able to act as client or server.")
@@ -70,7 +74,7 @@ var (
 
 	cmdFileCat         = cmdFile.Command("cat", "Write the file to stdout.")
 	cmdFileCatPath     = cmdFileCat.Arg("filename", "The file to write to stdout on the server.").Required().String()
-	flagFileCatVersion = cmdFileCat.Flag("version", "Specifies a version number to retreive instead of the current version").Int()
+	flagFileCatVersion = cmdFileCat.Flag("catver", "Specifies a version number to retreive instead of the current version").Int()
 
 	// Version sub-commands
 	cmdVersions = appFlags.Command("versions", "Version management command.")
@@ -87,7 +91,7 @@ var (
 
 	// Sync commands
 	cmdSync         = appFlags.Command("sync", "Synchronizes a path with the server.")
-	flagSyncVersion = cmdSync.Flag("version", "Specifies a version number to sync instead of the current version").Int()
+	flagSyncVersion = cmdSync.Flag("syncver", "Specifies a version number to sync instead of the current version").Int()
 	argSyncPath     = cmdSync.Arg("filepath", "The file to sync with the server.").Required().String()
 	argSyncTarget   = cmdSync.Arg("target", "The file path to sync to on the server; defaults to the same as the filename arg.").Default("").String()
 
@@ -290,6 +294,7 @@ func interactiveGetHost() string {
 }
 
 func main() {
+	appFlags.Version(versionString)
 	parsedFlags := kingpin.MustParse(appFlags.Parse(os.Args[1:]))
 	rand.Seed(time.Now().UnixNano())
 
@@ -304,7 +309,7 @@ func main() {
 	// we won't print the header while running certain commands that might be more
 	// directly piped to other commands like `file cat`.
 	if parsedFlags != cmdFileCat.FullCommand() {
-		cmdState.Println("Filefreezer (Alpha-1) Copyright (C) 2017 by Timothy Bogdala <tdb@animal-machine.com>")
+		cmdState.Printf("Filefreezer (%s) Copyright (C) 2017 by Timothy Bogdala <tdb@animal-machine.com>\n", versionString)
 		cmdState.Println("This program comes with ABSOLUTELY NO WARRANTY. This is free software")
 		cmdState.Println("and you are welcome to redistribute it under certain conditions.")
 		cmdState.Println("")

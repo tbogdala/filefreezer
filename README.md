@@ -217,7 +217,7 @@ file, you can do so with the following command which will overrite the local
 file with the original version of the file still stored on the server:
 
 ```bash
-freezer -u admin -p 1234 -s secret -h localhost:8080 sync --version=1 ~/hello.txt hello.txt
+freezer -u admin -p 1234 -s secret -h localhost:8080 sync --syncver=1 ~/hello.txt hello.txt
 ```
 
 The local file should now be set back to what it was when it was originally synchronzied.
