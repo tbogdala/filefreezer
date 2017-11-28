@@ -1,4 +1,39 @@
+// Copyright 2017, Timothy Bogdala <tdb@animal-machine.com>
+// See the LICENSE file for more details.
 package main
+
+/*
+
+The GTK Filefreezer Client
+==========================
+
+Idea list
+---------
+
+* Multiple configurations for filefreezer server connections. Requires:
+	- username
+	- password?
+	- cryptopass?
+	- name of the server connection (e.g. Webserver, LocalPi, etc...)
+
+* For each connection, a list of directories to sync. Requires:
+	- local filepath
+	- remote prefix
+	- icon for showing sync state
+
+* Dialog box for entering passwords
+	- possibly save passwords per session
+
+* Minimize to task tray
+
+* Periodically sync
+	- can attempt to use the revision number for the account through the API
+
+* Monitor IO progress and show a progress bar of some kind
+
+* Save the configuration file using bitbucket.org/tshannon/config
+
+*/
 
 import (
 	"fmt"
@@ -11,9 +46,16 @@ import (
 )
 
 const (
-	gladeFile          = "app.glade"
-	gladeAppWindow     = "AppWindow"
-	gladeDirTree       = "DirectoryTree"
+	gladeFile = "app.glade"
+
+	gladeAppWindow        = "AppWindow"
+	gladeDirTree          = "DirectoryTree"
+	gladeStatusBar        = "StatusBar"
+	gladeServerConf       = "ServerConfComboBox"
+	gladeAddServerConf    = "AddServerConfButton"
+	gladeRemoveServerConf = "RemoveServerConfButton"
+	gladeAddDirectory     = "AddDirectoryButton"
+
 	iconFolderFilepath = "folder.png"
 	iconFileFilepath   = "file.png"
 )
@@ -31,33 +73,42 @@ func main() {
 	// load the user interface file
 	builder, err := gtk.BuilderNew()
 	if err != nil {
-		log.Fatal("Unalbe to create the GTK Builder object:", err)
+		fmt.Printf("Unable to create the GTK Builder object: %v\n", err)
+		return
 	}
 
 	err = builder.AddFromFile(gladeFile)
 	if err != nil {
-		log.Fatal("Unable to load GTK user interface file:", err)
+		fmt.Printf("Unable to load GTK user interface file: %v\n", err)
+		return
 	}
 
 	// setup the main application window
 	win, err := getAppWindow(builder)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println(err.Error())
+		return
 	}
 	win.ShowAll()
-	win.Connect("destroy", func() {
-		gtk.MainQuit()
-	})
+
+	// bind all of the necessary events for the window
+	err = mainWindowConnectEvents(builder, win)
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
 
 	// attempt to get at the directory tree model
 	dirTree, err := getDirectoryTree(builder)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println(err.Error())
+		return
 	}
 
 	dirTreeStore, err := setupDirectoryTree(dirTree)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println(err.Error())
+		return
 	}
 
 	level1 := addDirTreeRow(dirTreeStore, nil, imageFolder, "Test Folder 001")
@@ -65,11 +116,48 @@ func main() {
 	level3 := addDirTreeRow(dirTreeStore, level2, imageFolder, "Test Folder 003")
 	level4 := addDirTreeRow(dirTreeStore, level3, imageFolder, "Test Folder 004")
 	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 004")
+	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 005")
+	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
 	dirTree.ExpandAll()
 
 	// Begin executing the GTK main loop.  This blocks until
 	// gtk.MainQuit() is run.
 	gtk.Main()
+}
+
+func mainWindowConnectEvents(builder *gtk.Builder, win *gtk.ApplicationWindow) error {
+	win.Connect("destroy", func() {
+		gtk.MainQuit()
+	})
+
+	addConfBtn, err := getAddServerConfButton(builder)
+	if err != nil {
+		return err
+	}
+	addConfBtn.Connect("clicked", func() {
+		fmt.Printf("Clicked!\n")
+		addConfDlg, err := createAddServerConfDialog(builder, win)
+		if err != nil {
+			fmt.Printf("Failed to show the add server configuration dialog: %v\n", err)
+			return
+		}
+
+		retVal := addConfDlg.Run()
+		if retVal == int(gtk.RESPONSE_OK) {
+			fmt.Printf("Do add action\n")
+		}
+	})
+
+	return nil
 }
 
 func initIcons() {
@@ -153,6 +241,20 @@ func getDirectoryTree(builder *gtk.Builder) (*gtk.TreeView, error) {
 	return tree, nil
 }
 
+func getAddServerConfButton(builder *gtk.Builder) (*gtk.Button, error) {
+	buttonObj, err := builder.GetObject(gladeAddServerConf)
+	if err != nil {
+		return nil, fmt.Errorf("unable to access add server configuration button: %v", err)
+	}
+
+	btn, ok := buttonObj.(*gtk.Button)
+	if !ok {
+		return nil, fmt.Errorf("failed to cast the add server configuration object")
+	}
+
+	return btn, nil
+}
+
 func getAppWindow(builder *gtk.Builder) (*gtk.ApplicationWindow, error) {
 	winObj, err := builder.GetObject(gladeAppWindow)
 	if err != nil {
@@ -165,4 +267,18 @@ func getAppWindow(builder *gtk.Builder) (*gtk.ApplicationWindow, error) {
 	}
 
 	return win, nil
+}
+
+func getBuilderTextEntryByName(builder *gtk.Builder, name string) (*gtk.Entry, error) {
+	obj, err := builder.GetObject(name)
+	if err != nil {
+		return nil, err
+	}
+
+	entry, okay := obj.(*gtk.Entry)
+	if !okay {
+		return nil, fmt.Errorf("failed to cast the gtk object to an entry control")
+	}
+
+	return entry, nil
 }
