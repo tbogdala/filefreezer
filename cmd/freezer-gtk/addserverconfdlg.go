@@ -83,12 +83,38 @@ func createAddServerConfDialog(builder *gtk.Builder, parentWin *gtk.ApplicationW
 func (d *addServerConfDialog) Run() int {
 	d.dlg.ShowAll()
 	retVal := d.dlg.Run()
-
-	if retVal == int(gtk.RESPONSE_OK) {
-		fmt.Printf("Do add action\n")
-	}
-
 	d.dlg.Hide()
 
 	return retVal
+}
+
+// GetConnectInfo pulls the user entered data from the view controls
+// and populates a new ServerConnectInfo object with that data.
+func (d *addServerConfDialog) GetConnectInfo() (info ServerConnectInfo, err error) {
+	info.FriendlyName, err = d.serverNameEntry.GetText()
+	if err != nil {
+		return info, err
+	}
+
+	info.URL, err = d.serverURLEntry.GetText()
+	if err != nil {
+		return info, err
+	}
+
+	info.Username, err = d.serverUsernameEntry.GetText()
+	if err != nil {
+		return info, err
+	}
+
+	info.Password, err = d.serverPasswordEntry.GetText()
+	if err != nil {
+		return info, err
+	}
+
+	info.CryptoPass, err = d.serverCryptoPassEntry.GetText()
+	if err != nil {
+		return info, err
+	}
+
+	return info, err
 }

@@ -51,7 +51,7 @@ const (
 	gladeAppWindow        = "AppWindow"
 	gladeDirTree          = "DirectoryTree"
 	gladeStatusBar        = "StatusBar"
-	gladeServerConf       = "ServerConfComboBox"
+	gladeServerConf       = "ServerNameComboBox"
 	gladeAddServerConf    = "AddServerConfButton"
 	gladeRemoveServerConf = "RemoveServerConfButton"
 	gladeAddDirectory     = "AddDirectoryButton"
@@ -63,12 +63,24 @@ const (
 var (
 	imageFolder *gdk.Pixbuf
 	imageFile   *gdk.Pixbuf
+
+	// the loaded user configuration file
+	userConfig *UserConfig
 )
 
 func main() {
+	var err error
+
 	// Initialize GTK without parsing any command line arguments.
 	gtk.Init(nil)
 	initIcons()
+
+	// load the user's configuration file
+	userConfig, err = LoadDefaultUserConfigFile()
+	if err != nil {
+		fmt.Printf("Unable to load the user configuration file: %v\n", err)
+		return
+	}
 
 	// load the user interface file
 	builder, err := gtk.BuilderNew()
@@ -93,6 +105,13 @@ func main() {
 
 	// bind all of the necessary events for the window
 	err = mainWindowConnectEvents(builder, win)
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+
+	// setup the server connections found in the user config
+	err = setupServerConnectInfos(builder, userConfig.ServerConnectionInfos)
 	if err != nil {
 		fmt.Println(err.Error())
 		return
@@ -136,6 +155,13 @@ func main() {
 
 func mainWindowConnectEvents(builder *gtk.Builder, win *gtk.ApplicationWindow) error {
 	win.Connect("destroy", func() {
+		// before we quit, save the user configuration file
+		err := userConfig.Save()
+		if err != nil {
+			fmt.Printf("Failed to save the user configuration: %v\n", err)
+			// no return here, we continue on so we Quit the app.
+		}
+
 		gtk.MainQuit()
 	})
 
@@ -144,7 +170,6 @@ func mainWindowConnectEvents(builder *gtk.Builder, win *gtk.ApplicationWindow) e
 		return err
 	}
 	addConfBtn.Connect("clicked", func() {
-		fmt.Printf("Clicked!\n")
 		addConfDlg, err := createAddServerConfDialog(builder, win)
 		if err != nil {
 			fmt.Printf("Failed to show the add server configuration dialog: %v\n", err)
@@ -153,8 +178,51 @@ func mainWindowConnectEvents(builder *gtk.Builder, win *gtk.ApplicationWindow) e
 
 		retVal := addConfDlg.Run()
 		if retVal == int(gtk.RESPONSE_OK) {
-			fmt.Printf("Do add action\n")
+			newInfo, err := addConfDlg.GetConnectInfo()
+			if err != nil {
+				fmt.Printf("Failed to get the connection information from the UI: %v\n", err)
+				return
+			}
+
+			// add the connection info to the user configuration file
+			userConfig.ServerConnectionInfos = append(userConfig.ServerConnectionInfos, newInfo)
 		}
+	})
+
+	removeConfBtn, err := getRemoveServerConfBuftton(builder)
+	if err != nil {
+		return err
+	}
+	removeConfBtn.Connect("clicked", func() {
+		combo, err := getServerConfComboBox(builder)
+		if err != nil {
+			fmt.Printf("Failed to access the server configuration combo box: %v\n", err)
+			return
+		}
+
+		activeIndex := combo.GetActive()
+		if activeIndex < 0 {
+			return // if there's no active item we just return here w/o action
+		}
+
+		// remove the item at the activeIndex location in the server connection slice
+		if activeIndex == 0 {
+			userConfig.ServerConnectionInfos = userConfig.ServerConnectionInfos[1:]
+		} else if activeIndex == len(userConfig.ServerConnectionInfos)-1 {
+			userConfig.ServerConnectionInfos = userConfig.ServerConnectionInfos[:activeIndex]
+		} else {
+			userConfig.ServerConnectionInfos = append(
+				userConfig.ServerConnectionInfos[:activeIndex],
+				userConfig.ServerConnectionInfos[activeIndex+1:]...)
+		}
+
+		// reset the combo box with the server friendly names
+		err = setupServerConnectInfos(builder, userConfig.ServerConnectionInfos)
+		if err != nil {
+			fmt.Println(err.Error())
+			return
+		}
+
 	})
 
 	return nil
@@ -191,6 +259,25 @@ func addDirTreeRow(treeStore *gtk.TreeStore, iter *gtk.TreeIter, icon *gdk.Pixbu
 	}
 
 	return i
+}
+
+func setupServerConnectInfos(builder *gtk.Builder, infos []ServerConnectInfo) error {
+	combo, err := getServerConfComboBox(builder)
+	if err != nil {
+		return err
+	}
+
+	// remove all previous existing items and then ad
+	combo.RemoveAll()
+	for _, info := range infos {
+		combo.AppendText(info.FriendlyName)
+	}
+
+	if len(infos) > 0 {
+		combo.SetActive(0)
+	}
+
+	return nil
 }
 
 func setupDirectoryTree(dirTree *gtk.TreeView) (*gtk.TreeStore, error) {
@@ -241,8 +328,30 @@ func getDirectoryTree(builder *gtk.Builder) (*gtk.TreeView, error) {
 	return tree, nil
 }
 
+func getServerConfComboBox(builder *gtk.Builder) (*gtk.ComboBoxText, error) {
+	comboObj, err := builder.GetObject(gladeServerConf)
+	if err != nil {
+		return nil, fmt.Errorf("unable to access add server configuration button: %v", err)
+	}
+
+	combo, ok := comboObj.(*gtk.ComboBoxText)
+	if !ok {
+		return nil, fmt.Errorf("failed to cast the add server configuration object")
+	}
+
+	return combo, nil
+}
+
+func getRemoveServerConfBuftton(builder *gtk.Builder) (*gtk.Button, error) {
+	return getBuilderButtonByName(builder, gladeRemoveServerConf)
+}
+
 func getAddServerConfButton(builder *gtk.Builder) (*gtk.Button, error) {
-	buttonObj, err := builder.GetObject(gladeAddServerConf)
+	return getBuilderButtonByName(builder, gladeAddServerConf)
+}
+
+func getBuilderButtonByName(builder *gtk.Builder, name string) (*gtk.Button, error) {
+	buttonObj, err := builder.GetObject(name)
 	if err != nil {
 		return nil, fmt.Errorf("unable to access add server configuration button: %v", err)
 	}

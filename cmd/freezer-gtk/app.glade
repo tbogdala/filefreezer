@@ -46,7 +46,7 @@
               </packing>
             </child>
             <child>
-              <object class="GtkComboBox" id="ServerConfComboBox">
+              <object class="GtkComboBoxText" id="ServerNameComboBox">
                 <property name="visible">True</property>
                 <property name="can_focus">False</property>
               </object>
@@ -429,5 +429,8 @@
       <action-widget response="-5">AddConfButton</action-widget>
       <action-widget response="-6">CancelConfButton</action-widget>
     </action-widgets>
+    <child>
+      <placeholder/>
+    </child>
   </object>
 </interface>
