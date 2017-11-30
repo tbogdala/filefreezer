@@ -38,23 +38,18 @@ Idea list
 import (
 	"fmt"
 	"log"
+	"runtime"
 
 	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/glib"
-
 	"github.com/gotk3/gotk3/gtk"
+
+	"github.com/tbogdala/filefreezer"
+	"github.com/tbogdala/filefreezer/cmd/freezer/command"
 )
 
 const (
 	gladeFile = "app.glade"
-
-	gladeAppWindow        = "AppWindow"
-	gladeDirTree          = "DirectoryTree"
-	gladeStatusBar        = "StatusBar"
-	gladeServerConf       = "ServerNameComboBox"
-	gladeAddServerConf    = "AddServerConfButton"
-	gladeRemoveServerConf = "RemoveServerConfButton"
-	gladeAddDirectory     = "AddDirectoryButton"
 
 	iconFolderFilepath = "folder.png"
 	iconFileFilepath   = "file.png"
@@ -66,7 +61,16 @@ var (
 
 	// the loaded user configuration file
 	userConfig *UserConfig
+
+	// the main applicaiton window for the program
+	mainWnd *mainWindow
 )
+
+// Be on the safe side and lock the current goroutine to the same
+// OS thread to possibly avoid GTK issues.
+func init() {
+	runtime.LockOSThread()
+}
 
 func main() {
 	var err error
@@ -96,65 +100,112 @@ func main() {
 	}
 
 	// setup the main application window
-	win, err := getAppWindow(builder)
+	mainWnd, err = createMainWindow(builder)
 	if err != nil {
 		fmt.Println(err.Error())
 		return
 	}
-	win.ShowAll()
 
 	// bind all of the necessary events for the window
-	err = mainWindowConnectEvents(builder, win)
-	if err != nil {
-		fmt.Println(err.Error())
-		return
-	}
+	mainWindowConnectEvents(mainWnd)
+	mainWnd.RefreshServerConnections(userConfig.ServerConnectionInfos)
+	mainWnd.Show()
 
-	// setup the server connections found in the user config
-	err = setupServerConnectInfos(builder, userConfig.ServerConnectionInfos)
-	if err != nil {
-		fmt.Println(err.Error())
-		return
-	}
+	/*
+		// attempt to get at the directory tree model
+		dirTree, err := getDirectoryTree(builder)
+		if err != nil {
+			fmt.Println(err.Error())
+			return
+		}
 
-	// attempt to get at the directory tree model
-	dirTree, err := getDirectoryTree(builder)
-	if err != nil {
-		fmt.Println(err.Error())
-		return
-	}
+		dirTreeStore, err := setupDirectoryTree(dirTree)
+		if err != nil {
+			fmt.Println(err.Error())
+			return
+		}
 
-	dirTreeStore, err := setupDirectoryTree(dirTree)
-	if err != nil {
-		fmt.Println(err.Error())
-		return
-	}
+		level1 := addDirTreeRow(dirTreeStore, nil, imageFolder, "Test Folder 001")
+		level2 := addDirTreeRow(dirTreeStore, level1, imageFolder, "Test Folder 002")
+		level3 := addDirTreeRow(dirTreeStore, level2, imageFolder, "Test Folder 003")
+		level4 := addDirTreeRow(dirTreeStore, level3, imageFolder, "Test Folder 004")
+		addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 004")
+		addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 005")
+		addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+		addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+		addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+		addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+		addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+		addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+		addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+		addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+		addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+		addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
+		dirTree.ExpandAll()
+	*/
 
-	level1 := addDirTreeRow(dirTreeStore, nil, imageFolder, "Test Folder 001")
-	level2 := addDirTreeRow(dirTreeStore, level1, imageFolder, "Test Folder 002")
-	level3 := addDirTreeRow(dirTreeStore, level2, imageFolder, "Test Folder 003")
-	level4 := addDirTreeRow(dirTreeStore, level3, imageFolder, "Test Folder 004")
-	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 004")
-	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 005")
-	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
-	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
-	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
-	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
-	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
-	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
-	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
-	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
-	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
-	addDirTreeRow(dirTreeStore, level4, imageFile, "Test File 006")
-	dirTree.ExpandAll()
+	/*
+		var lame func(s string) bool
+		lame = func(s string) bool {
+			fmt.Println(s)
+			//glib.TimeoutAdd(1000, lame, "IdleAdd executed")
+			return true
+		}
+		glib.TimeoutAdd(1000, lame, "IdleAdd executed")
+	*/
+
+	// start a go routine to connect to the server and retreive the file
+	// list for the user. when the list is retrieved, send it over
+	// to the gui via an idle thread handler.
+	go func() {
+		if len(userConfig.ServerConnectionInfos) < 1 {
+			return
+		}
+
+		cmdState := command.NewState()
+		connInfo := userConfig.ServerConnectionInfos[0]
+
+		// attempt to get the authentication token
+		err = cmdState.Authenticate(connInfo.URL, connInfo.Username, connInfo.Password)
+		if err != nil {
+			fmt.Printf("Failed to authenticate to the server (%s): %v\n", connInfo.URL, err)
+			return
+		}
+
+		// make sure the crypto key is correct
+		cmdState.CryptoKey, err = filefreezer.VerifyCryptoPassword(connInfo.CryptoPass, string(cmdState.CryptoHash))
+		if err != nil {
+			fmt.Printf("Failed to set the crypto key for the user: %v", err)
+			return
+		}
+
+		// get all of the files
+		allFiles, err := cmdState.GetAllFileHashes()
+		if err != nil {
+			fmt.Printf("Failed to get the file list from the server: %v\n", err)
+			return
+		}
+
+		glib.IdleAdd(func(files []filefreezer.FileInfo) bool {
+			for _, fi := range files {
+				plaintextFilename, err := cmdState.DecryptString(fi.FileName)
+				if err != nil {
+					fmt.Printf("Failed to decrypt string: %v\n", err)
+				} else {
+					fmt.Printf("Files: %s\n", plaintextFilename)
+				}
+			}
+			return false
+		}, allFiles)
+	}()
 
 	// Begin executing the GTK main loop.  This blocks until
 	// gtk.MainQuit() is run.
 	gtk.Main()
 }
 
-func mainWindowConnectEvents(builder *gtk.Builder, win *gtk.ApplicationWindow) error {
-	win.Connect("destroy", func() {
+func mainWindowConnectEvents(wnd *mainWindow) {
+	wnd.OnDestroy = func() {
 		// before we quit, save the user configuration file
 		err := userConfig.Save()
 		if err != nil {
@@ -163,44 +214,17 @@ func mainWindowConnectEvents(builder *gtk.Builder, win *gtk.ApplicationWindow) e
 		}
 
 		gtk.MainQuit()
-	})
-
-	addConfBtn, err := getAddServerConfButton(builder)
-	if err != nil {
-		return err
 	}
-	addConfBtn.Connect("clicked", func() {
-		addConfDlg, err := createAddServerConfDialog(builder, win)
-		if err != nil {
-			fmt.Printf("Failed to show the add server configuration dialog: %v\n", err)
-			return
-		}
 
-		retVal := addConfDlg.Run()
-		if retVal == int(gtk.RESPONSE_OK) {
-			newInfo, err := addConfDlg.GetConnectInfo()
-			if err != nil {
-				fmt.Printf("Failed to get the connection information from the UI: %v\n", err)
-				return
-			}
+	wnd.OnAddServerConnection = func(newInfo ServerConnectInfo) {
+		// add the connection info to the user configuration file
+		userConfig.ServerConnectionInfos = append(userConfig.ServerConnectionInfos, newInfo)
 
-			// add the connection info to the user configuration file
-			userConfig.ServerConnectionInfos = append(userConfig.ServerConnectionInfos, newInfo)
-		}
-	})
-
-	removeConfBtn, err := getRemoveServerConfBuftton(builder)
-	if err != nil {
-		return err
+		// reset the combo box with the server friendly names
+		wnd.RefreshServerConnections(userConfig.ServerConnectionInfos)
 	}
-	removeConfBtn.Connect("clicked", func() {
-		combo, err := getServerConfComboBox(builder)
-		if err != nil {
-			fmt.Printf("Failed to access the server configuration combo box: %v\n", err)
-			return
-		}
 
-		activeIndex := combo.GetActive()
+	wnd.OnRemoveServerConnection = func(activeIndex int) {
 		if activeIndex < 0 {
 			return // if there's no active item we just return here w/o action
 		}
@@ -217,15 +241,8 @@ func mainWindowConnectEvents(builder *gtk.Builder, win *gtk.ApplicationWindow) e
 		}
 
 		// reset the combo box with the server friendly names
-		err = setupServerConnectInfos(builder, userConfig.ServerConnectionInfos)
-		if err != nil {
-			fmt.Println(err.Error())
-			return
-		}
-
-	})
-
-	return nil
+		wnd.RefreshServerConnections(userConfig.ServerConnectionInfos)
+	}
 }
 
 func initIcons() {
@@ -243,6 +260,7 @@ func initIcons() {
 	return
 }
 
+/*
 // a nil iter adds a root node to the tree
 func addDirTreeRow(treeStore *gtk.TreeStore, iter *gtk.TreeIter, icon *gdk.Pixbuf, text string) *gtk.TreeIter {
 	// Get an iterator for a new row at the end of the list store
@@ -259,25 +277,6 @@ func addDirTreeRow(treeStore *gtk.TreeStore, iter *gtk.TreeIter, icon *gdk.Pixbu
 	}
 
 	return i
-}
-
-func setupServerConnectInfos(builder *gtk.Builder, infos []ServerConnectInfo) error {
-	combo, err := getServerConfComboBox(builder)
-	if err != nil {
-		return err
-	}
-
-	// remove all previous existing items and then ad
-	combo.RemoveAll()
-	for _, info := range infos {
-		combo.AppendText(info.FriendlyName)
-	}
-
-	if len(infos) > 0 {
-		combo.SetActive(0)
-	}
-
-	return nil
 }
 
 func setupDirectoryTree(dirTree *gtk.TreeView) (*gtk.TreeStore, error) {
@@ -314,41 +313,7 @@ func setupDirectoryTree(dirTree *gtk.TreeView) (*gtk.TreeStore, error) {
 	return store, nil
 }
 
-func getDirectoryTree(builder *gtk.Builder) (*gtk.TreeView, error) {
-	treeObj, err := builder.GetObject(gladeDirTree)
-	if err != nil {
-		return nil, fmt.Errorf("unable to access directory tree view: %v", err)
-	}
-
-	tree, ok := treeObj.(*gtk.TreeView)
-	if !ok {
-		return nil, fmt.Errorf("failed to cast the directory tree view object")
-	}
-
-	return tree, nil
-}
-
-func getServerConfComboBox(builder *gtk.Builder) (*gtk.ComboBoxText, error) {
-	comboObj, err := builder.GetObject(gladeServerConf)
-	if err != nil {
-		return nil, fmt.Errorf("unable to access add server configuration button: %v", err)
-	}
-
-	combo, ok := comboObj.(*gtk.ComboBoxText)
-	if !ok {
-		return nil, fmt.Errorf("failed to cast the add server configuration object")
-	}
-
-	return combo, nil
-}
-
-func getRemoveServerConfBuftton(builder *gtk.Builder) (*gtk.Button, error) {
-	return getBuilderButtonByName(builder, gladeRemoveServerConf)
-}
-
-func getAddServerConfButton(builder *gtk.Builder) (*gtk.Button, error) {
-	return getBuilderButtonByName(builder, gladeAddServerConf)
-}
+*/
 
 func getBuilderButtonByName(builder *gtk.Builder, name string) (*gtk.Button, error) {
 	buttonObj, err := builder.GetObject(name)
@@ -362,20 +327,6 @@ func getBuilderButtonByName(builder *gtk.Builder, name string) (*gtk.Button, err
 	}
 
 	return btn, nil
-}
-
-func getAppWindow(builder *gtk.Builder) (*gtk.ApplicationWindow, error) {
-	winObj, err := builder.GetObject(gladeAppWindow)
-	if err != nil {
-		return nil, fmt.Errorf("unable to access main application window: %v", err)
-	}
-
-	win, ok := winObj.(*gtk.ApplicationWindow)
-	if !ok {
-		return nil, fmt.Errorf("failed to cast the application window object")
-	}
-
-	return win, nil
 }
 
 func getBuilderTextEntryByName(builder *gtk.Builder, name string) (*gtk.Entry, error) {
