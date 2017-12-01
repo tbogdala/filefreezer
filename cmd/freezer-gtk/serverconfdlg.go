@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	gladeAddServerConfDlg              = "AddServerConfDialog"
+	gladeAddServerConfDlg              = "ServerConfDialog"
 	gladeAddServerConfServerName       = "ServerNameText"
 	gladeAddServerConfServerURL        = "ServerURLText"
 	gladeAddServerConfServerUsername   = "ServerUsernameText"
@@ -17,7 +17,7 @@ const (
 	gladeAddServerConfServerCryptoPass = "ServerCryptoPassText"
 )
 
-type addServerConfDialog struct {
+type serverConfDialog struct {
 	dlg *gtk.Dialog
 
 	serverNameEntry       *gtk.Entry
@@ -27,7 +27,7 @@ type addServerConfDialog struct {
 	serverCryptoPassEntry *gtk.Entry
 }
 
-func createAddServerConfDialog(builder *gtk.Builder, parentWin *gtk.ApplicationWindow) (*addServerConfDialog, error) {
+func createServerConfDialog(builder *gtk.Builder, parentWin *gtk.ApplicationWindow) (*serverConfDialog, error) {
 	dlgObj, err := builder.GetObject(gladeAddServerConfDlg)
 	if err != nil {
 		return nil, fmt.Errorf("unable to access the add server configuration dialog: %v", err)
@@ -43,7 +43,7 @@ func createAddServerConfDialog(builder *gtk.Builder, parentWin *gtk.ApplicationW
 	dlg.SetModal(true)
 
 	// get the dialog controls
-	result := new(addServerConfDialog)
+	result := new(serverConfDialog)
 	result.dlg = dlg
 	result.serverNameEntry, err = getBuilderTextEntryByName(builder, gladeAddServerConfServerName)
 	if err != nil {
@@ -80,7 +80,7 @@ func createAddServerConfDialog(builder *gtk.Builder, parentWin *gtk.ApplicationW
 
 // Run shows the addServerConfDialog box in a modal fashion and returns the result value
 // of the dialog box.
-func (d *addServerConfDialog) Run() int {
+func (d *serverConfDialog) Run() int {
 	d.dlg.ShowAll()
 	retVal := d.dlg.Run()
 	d.dlg.Hide()
@@ -88,9 +88,19 @@ func (d *addServerConfDialog) Run() int {
 	return retVal
 }
 
+// SetConnectInfo sets the dialog controls to the values of the supplied
+// ServerConnectInfo parameter.
+func (d *serverConfDialog) SetConnectInfo(info ServerConnectInfo) {
+	d.serverNameEntry.SetText(info.FriendlyName)
+	d.serverURLEntry.SetText(info.URL)
+	d.serverUsernameEntry.SetText(info.Username)
+	d.serverPasswordEntry.SetText(info.Password)
+	d.serverCryptoPassEntry.SetText(info.CryptoPass)
+}
+
 // GetConnectInfo pulls the user entered data from the view controls
 // and populates a new ServerConnectInfo object with that data.
-func (d *addServerConfDialog) GetConnectInfo() (info ServerConnectInfo, err error) {
+func (d *serverConfDialog) GetConnectInfo() (info ServerConnectInfo, err error) {
 	info.FriendlyName, err = d.serverNameEntry.GetText()
 	if err != nil {
 		return info, err

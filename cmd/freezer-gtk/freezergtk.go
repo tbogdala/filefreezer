@@ -154,54 +154,100 @@ func main() {
 		glib.TimeoutAdd(1000, lame, "IdleAdd executed")
 	*/
 
-	// start a go routine to connect to the server and retreive the file
-	// list for the user. when the list is retrieved, send it over
-	// to the gui via an idle thread handler.
-	go func() {
-		if len(userConfig.ServerConnectionInfos) < 1 {
-			return
-		}
-
-		cmdState := command.NewState()
-		connInfo := userConfig.ServerConnectionInfos[0]
-
-		// attempt to get the authentication token
-		err = cmdState.Authenticate(connInfo.URL, connInfo.Username, connInfo.Password)
-		if err != nil {
-			fmt.Printf("Failed to authenticate to the server (%s): %v\n", connInfo.URL, err)
-			return
-		}
-
-		// make sure the crypto key is correct
-		cmdState.CryptoKey, err = filefreezer.VerifyCryptoPassword(connInfo.CryptoPass, string(cmdState.CryptoHash))
-		if err != nil {
-			fmt.Printf("Failed to set the crypto key for the user: %v", err)
-			return
-		}
-
-		// get all of the files
-		allFiles, err := cmdState.GetAllFileHashes()
-		if err != nil {
-			fmt.Printf("Failed to get the file list from the server: %v\n", err)
-			return
-		}
-
-		glib.IdleAdd(func(files []filefreezer.FileInfo) bool {
-			for _, fi := range files {
-				plaintextFilename, err := cmdState.DecryptString(fi.FileName)
-				if err != nil {
-					fmt.Printf("Failed to decrypt string: %v\n", err)
-				} else {
-					fmt.Printf("Files: %s\n", plaintextFilename)
-				}
+	if len(userConfig.ServerConnectionInfos) > 0 {
+		// before we get the file list for the active connection, make sure that
+		// we have the right passwords to use
+		cancelOperation := false
+		password := userConfig.ServerConnectionInfos[0].Password
+		cryptopass := userConfig.ServerConnectionInfos[0].CryptoPass
+		if password == "" {
+			newPassword, okay, err := RunGetPasswordDialog(builder, mainWnd.wnd, "")
+			if err != nil {
+				fmt.Printf("failed to show the password dialog: %v\n", err)
+				return
 			}
-			return false
-		}, allFiles)
-	}()
+
+			if okay {
+				password = newPassword
+			} else {
+				cancelOperation = true
+			}
+		}
+
+		if !cancelOperation && cryptopass == "" {
+			newPassword, okay, err := RunGetPasswordDialog(builder, mainWnd.wnd, "Enter Cryptography Password")
+			if err != nil {
+				fmt.Printf("failed to show the crypto password dialog: %v\n", err)
+				return
+			}
+
+			if okay {
+				cryptopass = newPassword
+			} else {
+				cancelOperation = true
+			}
+		}
+
+		// start a go routine to connect to the server and retrieve the file
+		// list for the user. when the list is retrieved, send it over
+		// to the gui via an idle thread handler.
+		getFileListOp := func() {
+			cmdState := command.NewState()
+			connInfo := userConfig.ServerConnectionInfos[0]
+
+			// attempt to get the authentication token
+			err = cmdState.Authenticate(connInfo.URL, connInfo.Username, password)
+			if err != nil {
+				fmt.Printf("Failed to authenticate to the server (%s): %v\n", connInfo.URL, err)
+				return
+			}
+
+			// make sure the crypto key is correct
+			cmdState.CryptoKey, err = filefreezer.VerifyCryptoPassword(cryptopass, string(cmdState.CryptoHash))
+			if err != nil {
+				fmt.Printf("Failed to set the crypto key for the user: %v\v", err)
+				return
+			}
+
+			// get all of the files
+			allFiles, err := cmdState.GetAllFileHashes()
+			if err != nil {
+				fmt.Printf("Failed to get the file list from the server: %v\n", err)
+				return
+			}
+
+			glib.IdleAdd(func(files []filefreezer.FileInfo) bool {
+				for _, fi := range files {
+					plaintextFilename, err := cmdState.DecryptString(fi.FileName)
+					if err != nil {
+						fmt.Printf("Failed to decrypt string: %v\n", err)
+					} else {
+						fmt.Printf("Files: %s\n", plaintextFilename)
+					}
+				}
+				return false
+			}, allFiles)
+		}
+
+		if !cancelOperation {
+			go getFileListOp()
+		}
+	}
 
 	// Begin executing the GTK main loop.  This blocks until
 	// gtk.MainQuit() is run.
 	gtk.Main()
+}
+
+// getServerConfigAt returns the configuration at a given index.
+// NOTE: this is currently provided as a nicer face to accessing a module-level
+// global variable in the main window.
+func getServerConfigAt(index int) *ServerConnectInfo {
+	if index < 0 || index >= len(userConfig.ServerConnectionInfos) {
+		return nil
+	}
+
+	return &userConfig.ServerConnectionInfos[index]
 }
 
 func mainWindowConnectEvents(wnd *mainWindow) {
@@ -222,6 +268,10 @@ func mainWindowConnectEvents(wnd *mainWindow) {
 
 		// reset the combo box with the server friendly names
 		wnd.RefreshServerConnections(userConfig.ServerConnectionInfos)
+	}
+
+	wnd.OnEditServerConnection = func(index int, newInfo ServerConnectInfo) {
+		userConfig.ServerConnectionInfos[index] = newInfo
 	}
 
 	wnd.OnRemoveServerConnection = func(activeIndex int) {
@@ -279,39 +329,6 @@ func addDirTreeRow(treeStore *gtk.TreeStore, iter *gtk.TreeIter, icon *gdk.Pixbu
 	return i
 }
 
-func setupDirectoryTree(dirTree *gtk.TreeView) (*gtk.TreeStore, error) {
-	col, err := gtk.TreeViewColumnNew()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create a new treeview column: %v", err)
-	}
-
-	dirTree.AppendColumn(col)
-
-	iconRenderer, err := gtk.CellRendererPixbufNew()
-	if err != nil {
-		return nil, fmt.Errorf("unable to create pixbuf cell renderer: %v", err)
-	}
-
-	col.PackStart(&iconRenderer.CellRenderer, false)
-	col.AddAttribute(iconRenderer, "pixbuf", 0)
-
-	pathRenderer, err := gtk.CellRendererTextNew()
-	if err != nil {
-		return nil, fmt.Errorf("unable to create text cell renderer: %v", err)
-	}
-
-	col.PackStart(&pathRenderer.CellRenderer, true)
-	col.AddAttribute(pathRenderer, "text", 1)
-
-	// create the model
-	store, err := gtk.TreeStoreNew(glib.TYPE_OBJECT, glib.TYPE_STRING)
-	if err != nil {
-		return nil, fmt.Errorf("unable to create the treestore: %v", err)
-	}
-	dirTree.SetModel(store)
-
-	return store, nil
-}
 
 */
 

@@ -16,6 +16,13 @@ const (
 	configFilename = "userconfig.json"
 )
 
+// DirectoryMapping represents the logical connection between a local directory
+// and a string prefix used to organize the files on the server
+type DirectoryMapping struct {
+	LocalDirectory string
+	RemotePrefix   string
+}
+
 // UserConfig is the user's configuration information for the filefreezer
 // gtk client.
 type UserConfig struct {
@@ -32,6 +39,7 @@ type ServerConnectInfo struct {
 	Username     string
 	Password     string // can be empty -- if so prompt user at runtime
 	CryptoPass   string // can be empty -- if so prompt user at runtime
+	Mappings     []DirectoryMapping
 }
 
 // NewUserConfig creates a new user configuration object.

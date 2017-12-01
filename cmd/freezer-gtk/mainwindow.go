@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 
+	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
 )
 
@@ -15,7 +16,8 @@ const (
 	gladeServerConf       = "ServerNameComboBox"
 	gladeAddServerConf    = "AddServerConfButton"
 	gladeRemoveServerConf = "RemoveServerConfButton"
-	gladeAddDirectory     = "AddDirectoryButton"
+	gladeEditServerConf   = "EditServerConfButton"
+	gladeMapDirectory     = "MapDirectoryButton"
 )
 
 type mainWindow struct {
@@ -23,13 +25,17 @@ type mainWindow struct {
 	wnd     *gtk.ApplicationWindow
 
 	directoryTree      *gtk.TreeView
+	directoryTreeStore *gtk.TreeStore
 	statusBar          *gtk.Statusbar
 	serverConfCombo    *gtk.ComboBoxText
 	addServerButton    *gtk.Button
 	removeServerButton *gtk.Button
+	editServerButton   *gtk.Button
+	mapDirectoryButton *gtk.Button
 
 	OnDestroy                func()
 	OnAddServerConnection    func(newInfo ServerConnectInfo)
+	OnEditServerConnection   func(activeIndex int, newInfo ServerConnectInfo)
 	OnRemoveServerConnection func(activeIndex int)
 }
 
@@ -60,6 +66,21 @@ func createMainWindow(builder *gtk.Builder) (*mainWindow, error) {
 	}
 
 	mainWnd.removeServerButton, err = getBuilderButtonByName(mainWnd.builder, gladeRemoveServerConf)
+	if err != nil {
+		return nil, err
+	}
+
+	mainWnd.editServerButton, err = getBuilderButtonByName(mainWnd.builder, gladeEditServerConf)
+	if err != nil {
+		return nil, err
+	}
+
+	mainWnd.mapDirectoryButton, err = getBuilderButtonByName(mainWnd.builder, gladeMapDirectory)
+	if err != nil {
+		return nil, err
+	}
+
+	err = mainWnd.setupDirectoryTree()
 	if err != nil {
 		return nil, err
 	}
@@ -129,6 +150,42 @@ func (w *mainWindow) getAppWindow() (*gtk.ApplicationWindow, error) {
 	return win, nil
 }
 
+func (w *mainWindow) setupDirectoryTree() error {
+	col, err := gtk.TreeViewColumnNew()
+	if err != nil {
+		return fmt.Errorf("failed to create a new treeview column: %v", err)
+	}
+
+	w.directoryTree.AppendColumn(col)
+
+	iconRenderer, err := gtk.CellRendererPixbufNew()
+	if err != nil {
+		return fmt.Errorf("unable to create pixbuf cell renderer: %v", err)
+	}
+
+	col.PackStart(&iconRenderer.CellRenderer, false)
+	col.AddAttribute(iconRenderer, "pixbuf", 0)
+
+	pathRenderer, err := gtk.CellRendererTextNew()
+	if err != nil {
+		return fmt.Errorf("unable to create text cell renderer: %v", err)
+	}
+
+	col.PackStart(&pathRenderer.CellRenderer, true)
+	col.AddAttribute(pathRenderer, "text", 1)
+
+	// create the model
+	store, err := gtk.TreeStoreNew(glib.TYPE_OBJECT, glib.TYPE_STRING)
+	if err != nil {
+		return fmt.Errorf("unable to create the treestore: %v", err)
+	}
+
+	w.directoryTree.SetModel(store)
+	w.directoryTreeStore = store
+
+	return nil
+}
+
 func (w *mainWindow) connectEvents() {
 	w.wnd.Connect("destroy", func() {
 		if w.OnDestroy != nil {
@@ -142,9 +199,9 @@ func (w *mainWindow) connectEvents() {
 			return
 		}
 
-		addConfDlg, err := createAddServerConfDialog(w.builder, w.wnd)
+		addConfDlg, err := createServerConfDialog(w.builder, w.wnd)
 		if err != nil {
-			fmt.Printf("failed to show the add server configuration dialog: %v", err)
+			fmt.Printf("failed to show the server configuration dialog: %v", err)
 			return
 		}
 
@@ -152,11 +209,47 @@ func (w *mainWindow) connectEvents() {
 		if retVal == int(gtk.RESPONSE_OK) {
 			newInfo, err := addConfDlg.GetConnectInfo()
 			if err != nil {
-				fmt.Printf("failed to show the add server configuration dialog: %v", err)
+				fmt.Printf("failed to show the server configuration dialog: %v", err)
 				return
 			}
 
 			w.OnAddServerConnection(newInfo)
+		}
+	})
+
+	w.editServerButton.Connect("clicked", func() {
+		// if no event has been setup just return here
+		if w.OnEditServerConnection == nil {
+			return
+		}
+
+		// check for existing server connections to edit
+		activeIndex := w.serverConfCombo.GetActive()
+		if activeIndex < 0 {
+			return
+		}
+		existing := getServerConfigAt(activeIndex)
+		if existing == nil {
+			return
+		}
+
+		// create the dialog box and populate it with existing information
+		editConfDlg, err := createServerConfDialog(w.builder, w.wnd)
+		if err != nil {
+			fmt.Printf("failed to show the server configuration dialog: %v", err)
+			return
+		}
+		editConfDlg.SetConnectInfo(*existing)
+
+		retVal := editConfDlg.Run()
+		if retVal == int(gtk.RESPONSE_OK) {
+			newInfo, err := editConfDlg.GetConnectInfo()
+			if err != nil {
+				fmt.Printf("failed to show the server configuration dialog: %v", err)
+				return
+			}
+
+			w.OnEditServerConnection(activeIndex, newInfo)
 		}
 	})
 
@@ -172,6 +265,35 @@ func (w *mainWindow) connectEvents() {
 		}
 
 		w.OnRemoveServerConnection(activeIndex)
+	})
+
+	w.mapDirectoryButton.Connect("clicked", func() {
+		activeIndex := w.serverConfCombo.GetActive()
+		if activeIndex < 0 {
+			return // if there's no active item we just return here w/o action
+		}
+		existing := getServerConfigAt(activeIndex)
+		if existing == nil {
+			return
+		}
+
+		mapDirDlg, err := createMapDirectoryDialog(w.builder, w.wnd)
+		if err != nil {
+			fmt.Printf("Failed to show the map directory dialog: %v\n", err)
+			return
+		}
+
+		retVal := mapDirDlg.Run()
+		if retVal == int(gtk.RESPONSE_OK) {
+			mapping, err := mapDirDlg.GetMapping()
+			if err != nil {
+				fmt.Printf("Failed to get the directory mapping from the dialog: %v\n", err)
+				return
+			}
+
+			existing.Mappings = append(existing.Mappings, mapping)
+			fmt.Printf("DEBUG: %v\n", existing.Mappings)
+		}
 	})
 
 	return
