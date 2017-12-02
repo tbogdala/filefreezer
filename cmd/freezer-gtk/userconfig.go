@@ -34,12 +34,14 @@ type UserConfig struct {
 // filefreezer server. Using this, the user may setup multiple server connections
 // and save them in the configuration.
 type ServerConnectInfo struct {
-	FriendlyName string
-	URL          string
-	Username     string
-	Password     string // can be empty -- if so prompt user at runtime
-	CryptoPass   string // can be empty -- if so prompt user at runtime
-	Mappings     []DirectoryMapping
+	FriendlyName  string
+	URL           string
+	Username      string
+	Password      string // can be empty -- if so prompt user at runtime
+	CryptoPass    string // can be empty -- if so prompt user at runtime
+	Mappings      []DirectoryMapping
+	IsLocalServer bool
+	LocalServerDB string
 }
 
 // NewUserConfig creates a new user configuration object.
