@@ -60,20 +60,6 @@ For more information, see the page on [Docker Hub](https://hub.docker.com/r/tbog
 
 ---
 
-To build the project manually from source code, you will want to vendor the
-depenencies used by the project. This process is now managed by Go's 
-[dep](https://github.com/golang/dep) tool. Simply run the following 
-commands to build the vendor directory for dependencies and then build
-the `freezer` CLI executable.
-
-```
-cd $GOPATH/src/github.com/tbogdala/filefreezer
-dep ensure
-cd cmd/freezer
-go build
-go install
-```
-
 To serve HTTPS with self-signed TLS keys for development purposes, the necessary files
 can be generated with openssl using the certgen tool from the Go source code:
 
